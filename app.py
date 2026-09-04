@@ -43,7 +43,7 @@ GATEWAY_INFO = {
 }
 
 # --------------------------------------------------------------------------------------------------
-# UNCACHED Data Engines (Runs silently in the fragment)
+# UNCACHED Data Engines
 # --------------------------------------------------------------------------------------------------
 def generate_synthetic_telemetry(hours: int = 24, interval_minutes: int = 10):
     end_time = datetime.now()
@@ -196,7 +196,7 @@ def main():
     if 'ai_risk_filter' not in st.session_state: st.session_state.ai_risk_filter = 70
 
     # ----------------------------------------------------------------------------------------------
-    # STATIC WRAPPERS (These never flash)
+    # STATIC CONTROLS (Isolated outside fragment to prevent structural flashing)
     # ----------------------------------------------------------------------------------------------
     with st.sidebar:
         st.markdown("""
@@ -211,16 +211,15 @@ def main():
         live_mode = st.toggle("🔴 LIVE TELEMETRY STREAM", value=True)
         polling_val = st.select_slider("Refresh Frequency", options=["2 sec", "5 sec", "10 sec", "30 sec"], value="5 sec" if live_mode else "10 sec")
         
-        # Placeholders for dynamic sidebar content
+        # UI Placeholders for injected data
         sidebar_status_ph = st.empty()
         sidebar_threat_ph = st.empty()
         sidebar_time_ph = st.empty()
 
     header_ph = st.empty()
 
-    # Layout inputs created OUTSIDE the fragment to preserve state cleanly
     if app_mode == "🌍 Live GIS Map":
-        map_tile_choice, show_mesh_links, show_hazard_zones = None, None, None
+        pass # UI is fully rendered inside the fragment below for mapping
         
     elif app_mode == "📈 Telemetry & Visuals":
         c1, c2, c3 = st.columns([1, 1, 2])
@@ -238,7 +237,7 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ----------------------------------------------------------------------------------------------
-    # DYNAMIC FRAGMENT (Silently refreshes inner contents)
+    # DYNAMIC FRAGMENT (Seamlessly executes the Plotly diffs and Data pushes)
     # ----------------------------------------------------------------------------------------------
     poll_map = {"2 sec": 2, "5 sec": 5, "10 sec": 10, "30 sec": 30}
     sleep_seconds = poll_map.get(polling_val, 5)
@@ -255,7 +254,7 @@ def main():
         n_warning = len(latest_analyzed[latest_analyzed['severity'] == 'WARNING'])
         n_active = len(latest_analyzed)
 
-        # 2. Update Dynamic Sidebar Placeholders
+        # 2. Update Sidebar Elements
         with sidebar_status_ph.container():
             st.markdown("""
                 <div style="background: #ffffff; border-radius: 12px; padding: 16px; margin-top: 20px; margin-bottom: 20px; border: 2px solid #94a3b8;">
@@ -294,7 +293,7 @@ def main():
                 </div>
             """, unsafe_allow_html=True)
 
-        # 4. Render Active View Mode
+        # 4. Render Active View Mode content
         if app_mode == "🌍 Live GIS Map":
             col1, col2, col3, col4, col5 = st.columns(5)
             with col1: st.markdown(f'<div class="pill-box"><div class="icon-circle icon-blue">📍</div><div class="pill-data"><span class="pill-value">{n_active}</span><span class="pill-label">Total Nodes</span></div></div>', unsafe_allow_html=True)
@@ -305,16 +304,15 @@ def main():
                 
             st.markdown('<div class="glass-card"><h3>🌍 Spatial Mesh Topology</h3>', unsafe_allow_html=True)
             
-            # Sub-controls for the map
+            # Map Controls
             map_ctrl_c1, map_ctrl_c2, map_ctrl_c3 = st.columns([2, 2, 2])
-            with map_ctrl_c1: map_tile_choice = st.selectbox("Select Basemap Layer (View Style)", ["Esri Satellite", "CartoDB positron", "OpenStreetMap"], index=0, key="map1")
+            with map_ctrl_c1: map_tile_choice = st.selectbox("Select Basemap Layer (View Style)", ["Satellite (Esri)", "Light Canvas", "Dark Canvas"], index=0, key="map1")
             with map_ctrl_c2: show_mesh_links = st.checkbox("🔗 Render Wireless Mesh Links", value=True, key="map2")
             with map_ctrl_c3: show_hazard_zones = st.checkbox("⚠️ Show Mining Hazard Polygons", value=True, key="map3")
             
-            # Build Flicker-Free Plotly Mapbox
+            # Flicker-Free Plotly Mapbox Implementation
             fig_map = go.Figure()
 
-            # Hazard Zones
             if show_hazard_zones:
                 fig_map.add_trace(go.Scattermapbox(
                     mode="lines", fill="toself",
@@ -331,7 +329,6 @@ def main():
                     name="CRITICAL: Panel LW-104", hoverinfo="name"
                 ))
 
-            # Mesh Links
             if show_mesh_links:
                 node_lookup = {n['node_id']: n for n in NODES_TOPOLOGY}
                 node_lookup['GW-CENTRAL'] = {"lat": GATEWAY_INFO['lat'], "lon": GATEWAY_INFO['lon']}
@@ -340,14 +337,11 @@ def main():
                         parent = node_lookup[node['parent']]
                         link_color = "#15803d" if node['snr'] > 7.0 else ("#b45309" if node['snr'] > 4.0 else "#b91c1c")
                         fig_map.add_trace(go.Scattermapbox(
-                            mode="lines",
-                            lon=[node['lon'], parent['lon']],
-                            lat=[node['lat'], parent['lat']],
-                            line=dict(color=link_color, width=2),
-                            showlegend=False, hoverinfo="none"
+                            mode="lines", lon=[node['lon'], parent['lon']], lat=[node['lat'], parent['lat']],
+                            line=dict(color=link_color, width=2), showlegend=False, hoverinfo="none"
                         ))
             
-            # Gateway
+            # Central Gateway
             fig_map.add_trace(go.Scattermapbox(
                 mode="markers+text", lon=[GATEWAY_INFO['lon']], lat=[GATEWAY_INFO['lat']],
                 marker=dict(size=20, color="#1d4ed8", symbol="star"),
@@ -372,6 +366,8 @@ def main():
             if "Satellite" in map_tile_choice:
                 mapbox_style = "white-bg"
                 mapbox_layers = [{"below": 'traces', "sourcetype": "raster", "sourceattribution": "Esri", "source": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]}]
+            elif "Dark" in map_tile_choice:
+                mapbox_style = "carto-darkmatter"
             
             fig_map.update_layout(
                 mapbox=dict(style=mapbox_style, layers=mapbox_layers, center=dict(lat=BASE_LAT, lon=BASE_LON), zoom=14.5),
@@ -482,5 +478,132 @@ def main():
             st.markdown('</div>', unsafe_allow_html=True)
 
         elif app_mode == "🧠 AI & 3D Analytics":
-            # ... identical to app_2.py ...
-            # (To save output space while writing this plan, I'll copy the remaining blocks verbatim)
+            anomalies_detected = analyzed_df[analyzed_df['is_anomaly'] | (analyzed_df['severity'] != 'STABLE')]
+            max_risk_node = analyzed_df.loc[analyzed_df['subsidence_risk_pct'].idxmax()]
+            
+            ai_k1, ai_k2, ai_k3, ai_k4 = st.columns(4)
+            with ai_k1: st.markdown(f'<div class="soft-metric soft-metric-info"><div class="metric-title">Evaluated Samples Matrix</div><div class="metric-value">{len(analyzed_df):,}</div><div class="metric-sub">10 Nodes × 144 Frames</div></div>', unsafe_allow_html=True)
+            with ai_k2: st.markdown(f'<div class="soft-metric soft-metric-danger"><div class="metric-title">Total Flagged Anomalies</div><div class="metric-value">{len(anomalies_detected)}</div><div class="metric-sub">Contamination: {st.session_state.ai_contamination*100:.1f}%</div></div>', unsafe_allow_html=True)
+            with ai_k3: st.markdown(f'<div class="soft-metric soft-metric-warning"><div class="metric-title">Highest Risk Asset</div><div class="metric-value">{max_risk_node["node_id"]}</div><div class="metric-sub">Score: {max_risk_node["subsidence_risk_pct"]}%</div></div>', unsafe_allow_html=True)
+            with ai_k4: st.markdown(f'<div class="soft-metric soft-metric-success"><div class="metric-title">Model Precision Rate</div><div class="metric-value">98.4%</div><div class="metric-sub">Isolation Forest</div></div>', unsafe_allow_html=True)
+
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.markdown('<div class="glass-card"><h4>Overall System Risk Index</h4>', unsafe_allow_html=True)
+                fig_gauge = go.Figure(go.Indicator(
+                    mode="gauge+number", value=max_risk_node['subsidence_risk_pct'],
+                    number={'suffix': "%", 'font': {'size': 56, 'color': '#000000', 'weight': 'bold'}},
+                    gauge={
+                        'axis': {'range': [0, 100], 'tickwidth': 2, 'tickcolor': "black"}, 
+                        'bar': {'color': "#dc2626" if max_risk_node['subsidence_risk_pct'] > 75 else "#ea580c", 'thickness': 0.8},
+                        'bgcolor': "#e2e8f0", 'borderwidth': 2, 'bordercolor': "#cbd5e1",
+                        'steps': [{'range': [85, 100], 'color': 'rgba(220, 38, 38, 0.2)'}]
+                    }
+                ))
+                fig_gauge.update_layout(paper_bgcolor='rgba(0,0,0,0)', height=380, margin=dict(l=20, r=20, t=20, b=10))
+                st.plotly_chart(fig_gauge, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+            with c2:
+                st.markdown('<div class="glass-card"><h4>🌌 3D Anomaly Clustering Matrix</h4>', unsafe_allow_html=True)
+                fig_3d = px.scatter_3d(
+                    analyzed_df, x="tilt_mag", y="displacement_mm", z="vibration_rms", color="severity", 
+                    size="subsidence_risk_pct", size_max=15, opacity=0.8,
+                    color_discrete_map={"CRITICAL": "#dc2626", "WARNING": "#ea580c", "ELEVATED": "#7e22ce", "STABLE": "#94a3b8"}
+                )
+                fig_3d.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)', height=380, margin=dict(l=0,r=0,t=0,b=0),
+                    scene=dict(
+                        xaxis_title="Tilt (°)", yaxis_title="Displacement (mm)", zaxis_title="Vibration (g)",
+                        xaxis=dict(backgroundcolor="#f8fafc", gridcolor="white", showbackground=True),
+                        yaxis=dict(backgroundcolor="#f8fafc", gridcolor="white", showbackground=True),
+                        zaxis=dict(backgroundcolor="#f8fafc", gridcolor="white", showbackground=True)
+                    ),
+                    legend=dict(title="", font=dict(color="#000", size=14))
+                )
+                st.plotly_chart(fig_3d, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            st.markdown('<div class="glass-card"><h4>📋 Risk Audit Log & AI Mitigations</h4>', unsafe_allow_html=True)
+            filtered_anomalies = analyzed_df[(analyzed_df['subsidence_risk_pct'] >= st.session_state.ai_risk_filter) | (analyzed_df['severity'] != 'STABLE')].sort_values('timestamp', ascending=False)
+            
+            def get_action(sev):
+                if sev == "CRITICAL": return "🛑 Evacuate Sector & Deploy Drone"
+                elif sev in ["WARNING", "ELEVATED"]: return "⚠️ Increase Polling to 30s"
+                return "✅ Standard Active Monitoring"
+            filtered_anomalies['Recommended Action'] = filtered_anomalies['severity'].apply(get_action)
+            
+            audit_disp = filtered_anomalies[['timestamp', 'node_id', 'feature_triggered', 'subsidence_risk_pct', 'severity', 'Recommended Action']]
+            audit_disp.columns = ['Timestamp', 'Node ID', 'Triggers', 'Risk Score %', 'Severity', 'Recommended Action']
+            
+            st.dataframe(audit_disp.style.map(lambda v: 'background-color: #fee2e2; color: #b91c1c; font-weight: 900;' if v == 'CRITICAL' else ('background-color: #ffedd5; color: #c2410c; font-weight: 800;' if v in ['WARNING', 'ELEVATED'] else ''), subset=['Severity']), use_container_width=True, hide_index=True)
+            
+            report_csv = filtered_anomalies.to_csv(index=False).encode('utf-8')
+            st.download_button(label="📥 Download Secure AI Audit Report (CSV)", data=report_csv, file_name="ai_alerts_report.csv", mime="text/csv", type="primary")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        elif app_mode == "⚙️ Node Management":
+            
+            st.markdown(f"""
+                <div class="glass-card" style="padding-bottom: 12px; border: 2px solid #94a3b8;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <div style="font-size: 1.3rem; font-weight: 900; color: #1d4ed8;">📡 Master Gateway: {GATEWAY_INFO['gateway_id']}</div>
+                        <span class="status-pill-green">100% ONLINE UPTIME</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; font-size: 1rem; color: #111827; padding-bottom: 16px; font-weight: 600;">
+                        <div><span style="color: #64748b; font-size: 0.8rem; display: block; text-transform: uppercase;">Base Name</span> {GATEWAY_INFO['name']}</div>
+                        <div><span style="color: #64748b; font-size: 0.8rem; display: block; text-transform: uppercase;">RF Band Protocol</span> {GATEWAY_INFO['frequency']}</div>
+                        <div><span style="color: #64748b; font-size: 0.8rem; display: block; text-transform: uppercase;">TX Power Out</span> {GATEWAY_INFO['tx_power']}</div>
+                        <div><span style="color: #64748b; font-size: 0.8rem; display: block; text-transform: uppercase;">Mesh Arch</span> LoRaWAN / 6LoWPAN</div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            st.markdown("### 🎮 Two-Way Remote Command Dispatcher")
+            
+            cmd_col1, cmd_col2, cmd_col3 = st.columns([2, 3, 2])
+            with cmd_col1: target_node = st.selectbox("🎯 Select Target Node", ["BROADCAST_ALL"] + [n['node_id'] for n in NODES_TOPOLOGY])
+            with cmd_col2: cmd_type = st.selectbox("⚡ Execute Action Downlink", ["🔄 Reboot Node Hardware", "☁️ Force Immediate Sync", "📐 Calibrate IMU Baseline", "🚀 High-Frequency Mode"])
+            with cmd_col3: 
+                st.markdown("<div style='margin-top: 32px;'></div>", unsafe_allow_html=True)
+                send_btn = st.button("🚀 Dispatch Secure Payload", type="primary", use_container_width=True)
+
+            if send_btn:
+                time.sleep(0.6)
+                cmd_name = cmd_type.split(" ")[1] if " " in cmd_type else cmd_type
+                st.session_state.c2_command_log.insert(0, {
+                    "timestamp": datetime.now().strftime("%H:%M:%S"), "target": target_node, 
+                    "command": cmd_name.upper(), "hex_payload": "0xAA 0xFF 0x1B", "status": "ACK_RECEIVED (200 OK)",
+                    "latency_ms": np.random.randint(180, 360), "details": f"Dispatched via LoRa SF7"
+                })
+                st.success(f"✅ Secure Packet Acknowledgment Received from {target_node}!")
+
+            st.markdown("#### 📜 Secure Downlink History Log")
+            st.dataframe(pd.DataFrame(st.session_state.c2_command_log), use_container_width=True, hide_index=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            st.markdown('<div class="glass-card"><h4>🎛️ Complete Sensor Hardware Matrix</h4>', unsafe_allow_html=True)
+            health_records = [{"Node ID": n['node_id'], "Location Code": n['name'], "Hardware Role": n['role'], "Power System": n['power_type'], "Battery Level": f"{n['battery_pct']}%", "RSSI (dBm)": n['rssi'], "LoRa SNR": n['snr'], "Uplink Target": n['parent'], "Status": "Active"} for n in NODES_TOPOLOGY]
+            health_df = pd.DataFrame(health_records)
+            st.dataframe(health_df, use_container_width=True, hide_index=True)
+            
+            c_b1, c_b2 = st.columns(2)
+            with c_b1:
+                st.markdown("##### 🔋 Battery Charge Distribution (%)")
+                fig_batt = px.bar(health_df, x="Node ID", y=[int(x.split("%")[0]) for x in health_df["Battery Level"]], color=[int(x.split("%")[0]) for x in health_df["Battery Level"]], color_continuous_scale="Teal", template="plotly_white")
+                fig_batt.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=250, margin=dict(l=0, r=0, t=10, b=0), xaxis=dict(showgrid=False), yaxis=dict(gridcolor="#cbd5e1", range=[0,100]))
+                st.plotly_chart(fig_batt, use_container_width=True)
+            with c_b2:
+                st.markdown("##### 📶 LoRa RSSI Signal Heatmap (dBm)")
+                fig_rssi = px.bar(health_df, x="Node ID", y="RSSI (dBm)", color="LoRa SNR", color_continuous_scale="Purp", template="plotly_white")
+                fig_rssi.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=250, margin=dict(l=0, r=0, t=10, b=0), xaxis=dict(showgrid=False), yaxis=dict(gridcolor="#cbd5e1"))
+                st.plotly_chart(fig_rssi, use_container_width=True)
+                
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    # Boot the Fragment
+    render_live_dashboard()
+
+if __name__ == "__main__":
+    main()
