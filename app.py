@@ -1,7 +1,7 @@
 """
 ====================================================================================================
 GEO-SHIELD | Mine Subsidence Monitoring & Control Dashboard
-High Contrast Edition (Dropdown Visibility & Esri Satellite Default Fix)
+High Contrast Edition (Real-Time Live Streaming Enabled)
 ====================================================================================================
 """
 
@@ -46,11 +46,10 @@ GATEWAY_INFO = {
 }
 
 # --------------------------------------------------------------------------------------------------
-# Synthetic Telemetry Generation Engine (Cached)
+# UNCACHED Live Telemetry Engine (Generates fresh noise on every cycle)
 # --------------------------------------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
 def generate_synthetic_telemetry(hours: int = 24, interval_minutes: int = 10):
-    np.random.seed(42)
+    # Notice: np.random.seed is removed so the noise is fully dynamic on every refresh
     end_time = datetime.now()
     start_time = end_time - timedelta(hours=hours)
     timestamps = pd.date_range(start=start_time, end=end_time, freq=f"{interval_minutes}min")
@@ -111,9 +110,8 @@ def generate_synthetic_telemetry(hours: int = 24, interval_minutes: int = 10):
     return pd.DataFrame(records)
 
 # --------------------------------------------------------------------------------------------------
-# Machine Learning Engine
+# UNCACHED Machine Learning Engine
 # --------------------------------------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
 def train_and_detect_anomalies(df: pd.DataFrame, contamination: float = 0.05, crit_tilt: float = 3.5, vibe_limit: float = 0.25):
     features = ['tilt_mag', 'disp_rate_mmh', 'displacement_mm', 'vibration_rms', 'temperature_c']
     X = df[features].copy()
@@ -154,164 +152,54 @@ def train_and_detect_anomalies(df: pd.DataFrame, contamination: float = 0.05, cr
 def main():
     st.set_page_config(page_title="GEO-SHIELD Hub", page_icon="📡", layout="wide", initial_sidebar_state="expanded")
 
-    # Comprehensive High-Contrast & Dropdown Popover CSS Fix
     st.markdown("""
     <style>
-        /* Global Background & Core Text */
-        .stApp { 
-            background: #f4f6f9 !important; 
-            color: #000000 !important; 
-            font-family: 'Inter', 'Segoe UI', sans-serif; 
-        }
-        
-        /* Headings & Paragraph Enforcement */
+        .stApp { background: #f4f6f9 !important; color: #000000 !important; font-family: 'Inter', 'Segoe UI', sans-serif; }
         h1, h2, h3, h4, h5 { color: #000000 !important; font-weight: 800 !important; letter-spacing: -0.01em; margin-bottom: 12px; }
         p, span, div { color: #111827; }
-        
-        /* Force Streamlit Control Labels */
-        .stSlider label, .stSelectbox label, .stCheckbox label, div[data-testid="stMarkdownContainer"] p { 
-            font-weight: 800 !important; 
-            color: #000000 !important; 
-            font-size: 1.05rem !important; 
-        }
-
-        /* =========================================================================
-           COMPLETE DROPDOWN & POPOVER VISIBILITY OVERRIDE
-           Fixes dark-background / black-text popover issue across all portals
-           ========================================================================= */
-        /* Select Box Container Header */
-        div[data-baseweb="select"] > div { 
-            background-color: #ffffff !important; 
-            border: 2px solid #94a3b8 !important;
-            color: #000000 !important;
-            border-radius: 8px !important;
-        }
-        
-        /* Selected Value inside control */
-        div[data-baseweb="select"] * {
-            color: #000000 !important;
-            font-weight: 700 !important;
-        }
-
-        /* Floating Popover Container & Menus attached to document root */
-        div[data-baseweb="popover"], 
-        div[data-baseweb="menu"], 
-        ul[role="listbox"],
-        div[id^="bwb-"] {
-            background-color: #ffffff !important;
-            border: 2px solid #64748b !important;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.25) !important;
-        }
-        
-        /* Individual Dropdown Options */
-        li[role="option"], 
-        div[role="option"],
-        ul[role="listbox"] li {
-            background-color: #ffffff !important;
-            color: #000000 !important;
-            font-weight: 700 !important;
-            font-size: 0.95rem !important;
-            padding: 10px 14px !important;
-        }
-        
-        /* Hover and Active/Selected Options */
-        li[role="option"]:hover, 
-        li[role="option"][aria-selected="true"],
-        div[role="option"]:hover {
-            background-color: #dbeafe !important;
-            color: #1d4ed8 !important;
-        }
-        
-        /* Dropdown arrow icon color */
-        div[data-baseweb="select"] svg {
-            fill: #000000 !important;
-        }
-        /* ========================================================================= */
-
-        /* Sidebar Styling */
-        [data-testid="stSidebar"] {
-            background-color: #ffffff;
-            border-right: 2px solid #e2e8f0;
-            box-shadow: 4px 0 20px rgba(0, 0, 0, 0.05);
-        }
-        
-        /* High Contrast Cards */
-        .glass-card {
-            background: #ffffff;
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-            border: 1px solid #cbd5e1;
-            margin-bottom: 24px;
-        }
-        
-        /* Pill Box KPI Cards */
-        .pill-box {
-            display: flex;
-            align-items: center;
-            background: #ffffff;
-            border-radius: 12px;
-            padding: 16px 20px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            gap: 16px;
-            margin-bottom: 24px;
-            border: 2px solid #e2e8f0;
-        }
-        .icon-circle {
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.6rem;
-            font-weight: bold;
-        }
-        
+        .stSlider label, .stSelectbox label, .stCheckbox label, div[data-testid="stMarkdownContainer"] p { font-weight: 800 !important; color: #000000 !important; font-size: 1.05rem !important; }
+        div[data-baseweb="select"] > div { background-color: #ffffff !important; border: 2px solid #94a3b8 !important; color: #000000 !important; border-radius: 8px !important; }
+        div[data-baseweb="select"] * { color: #000000 !important; font-weight: 700 !important; }
+        div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"], div[id^="bwb-"] { background-color: #ffffff !important; border: 2px solid #64748b !important; box-shadow: 0 10px 25px rgba(0,0,0,0.25) !important; }
+        li[role="option"], div[role="option"], ul[role="listbox"] li { background-color: #ffffff !important; color: #000000 !important; font-weight: 700 !important; font-size: 0.95rem !important; padding: 10px 14px !important; }
+        li[role="option"]:hover, li[role="option"][aria-selected="true"], div[role="option"]:hover { background-color: #dbeafe !important; color: #1d4ed8 !important; }
+        div[data-baseweb="select"] svg { fill: #000000 !important; }
+        [data-testid="stSidebar"] { background-color: #ffffff; border-right: 2px solid #e2e8f0; box-shadow: 4px 0 20px rgba(0, 0, 0, 0.05); }
+        .glass-card { background: #ffffff; border-radius: 16px; padding: 24px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08); border: 1px solid #cbd5e1; margin-bottom: 24px; }
+        .pill-box { display: flex; align-items: center; background: #ffffff; border-radius: 12px; padding: 16px 20px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); gap: 16px; margin-bottom: 24px; border: 2px solid #e2e8f0; }
+        .icon-circle { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; font-weight: bold; }
         .icon-blue { background: #dbeafe; color: #1d4ed8; border: 2px solid #93c5fd; }
         .icon-orange { background: #ffedd5; color: #c2410c; border: 2px solid #fdba74; }
         .icon-purple { background: #f3e8ff; color: #7e22ce; border: 2px solid #d8b4fe; }
         .icon-red { background: #fee2e2; color: #b91c1c; border: 2px solid #fca5a5; }
         .icon-green { background: #dcfce7; color: #15803d; border: 2px solid #86efac; }
-        
         .pill-data { display: flex; flex-direction: column; }
-        .pill-value { font-size: 1.8rem; font-weight: 900; color: #000000 !important; line-height: 1.1; }
+        .pill-value { font-size: 1.8rem; font-weight: 900; color: #000000 !important; line-height: 1.1; font-family: monospace;}
         .pill-label { font-size: 0.9rem; font-weight: 800; color: #475569 !important; text-transform: uppercase; margin-top: 4px; }
-        
-        /* Metric Cards */
-        .soft-metric {
-            background: #ffffff;
-            border-radius: 12px;
-            padding: 16px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
-            border: 2px solid #cbd5e1;
-            margin-bottom: 16px;
-        }
+        .soft-metric { background: #ffffff; border-radius: 12px; padding: 16px; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08); border: 2px solid #cbd5e1; margin-bottom: 16px; }
         .soft-metric-danger { border-left: 6px solid #dc2626; }
         .soft-metric-warning { border-left: 6px solid #d97706; }
         .soft-metric-success { border-left: 6px solid #16a34a; }
         .soft-metric-info { border-left: 6px solid #2563eb; }
-        
         .metric-title { color: #1e293b !important; font-size: 0.85rem !important; text-transform: uppercase; font-weight: 800 !important; margin-bottom: 4px; }
-        .metric-value { color: #000000 !important; font-size: 1.6rem; font-weight: 900; }
+        .metric-value { color: #000000 !important; font-size: 1.6rem; font-weight: 900; font-family: monospace;}
         .metric-sub { color: #334155 !important; font-size: 0.8rem !important; font-weight: 600 !important; margin-top: 4px; }
-
-        /* Badges */
         .status-pill-red { background-color: #fee2e2; color: #b91c1c; padding: 6px 14px; border-radius: 8px; font-weight: 900; font-size: 0.85rem; border: 2px solid #fca5a5;}
         .status-pill-green { background-color: #dcfce7; color: #15803d; padding: 6px 14px; border-radius: 8px; font-weight: 900; font-size: 0.85rem; border: 2px solid #86efac;}
+        .live-pulse { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
     </style>
     """, unsafe_allow_html=True)
 
-    # Initialize Command Log
     if "c2_command_log" not in st.session_state:
         st.session_state.c2_command_log = [
             {"timestamp": (datetime.now() - timedelta(minutes=45)).strftime("%H:%M:%S"), "target": "NODE-02", "command": "FORCE_CLOUD_SYNC", "hex_payload": "0xAA 0x02 0x1F 0x00", "status": "ACK_RECEIVED", "latency_ms": 285, "details": "Telemetry burst sync completed."},
             {"timestamp": (datetime.now() - timedelta(minutes=20)).strftime("%H:%M:%S"), "target": "NODE-07", "command": "PING_ECHO", "hex_payload": "0xAA 0x07 0x01 0xFF", "status": "ACK_RECEIVED", "latency_ms": 194, "details": "Roundtrip RTT 194ms."}
         ]
 
+    # Data is generated fresh on every UI tick now
     raw_telemetry_df = generate_synthetic_telemetry(hours=24, interval_minutes=10)
     
-    # Store AI Params
     if 'ai_contamination' not in st.session_state: st.session_state.ai_contamination = 0.05
     if 'ai_crit_tilt' not in st.session_state: st.session_state.ai_crit_tilt = 3.5
     if 'ai_vibe_limit' not in st.session_state: st.session_state.ai_vibe_limit = 0.25
@@ -325,7 +213,7 @@ def main():
     n_active = len(latest_analyzed)
 
     # ==============================================================================================
-    # SIDEBAR NAVIGATION
+    # SIDEBAR NAVIGATION & LIVE CONTROLS
     # ==============================================================================================
     with st.sidebar:
         st.markdown("""
@@ -344,42 +232,46 @@ def main():
         
         st.markdown("<hr style='border: 1px solid #cbd5e1; margin: 24px 0;'>", unsafe_allow_html=True)
         
+        # Real-Time Controls
+        live_mode = st.toggle("🔴 LIVE TELEMETRY STREAM", value=True)
+        polling_val = st.select_slider("Refresh Frequency", options=["2 sec", "5 sec", "10 sec", "30 sec"], value="2 sec" if live_mode else "10 sec")
+        
         st.markdown("""
-            <div style="background: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 20px; border: 2px solid #94a3b8;">
+            <div style="background: #ffffff; border-radius: 12px; padding: 16px; margin-top: 20px; margin-bottom: 20px; border: 2px solid #94a3b8;">
                 <div style="font-size: 0.9rem; color: #000000; font-weight: 800; text-transform: uppercase; margin-bottom: 8px;">Network Status</div>
-                <div style="font-size: 1.2rem; color: #000000; font-weight: 900;">10 / 10 ONLINE <span class="status-pill-green" style="float: right;">●</span></div>
+                <div style="font-size: 1.2rem; color: #000000; font-weight: 900;">10 / 10 ONLINE <span class="status-pill-green live-pulse" style="float: right;">●</span></div>
             </div>
         """, unsafe_allow_html=True)
         
         if n_critical > 0:
             st.markdown("""
                 <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 12px; padding: 16px; margin-bottom: 20px;">
-                    <div style="font-size: 0.9rem; color: #b91c1c; font-weight: 900; text-transform: uppercase; margin-bottom: 8px;">⚠️ Active Threat</div>
+                    <div style="font-size: 0.9rem; color: #b91c1c; font-weight: 900; text-transform: uppercase; margin-bottom: 8px;" class="live-pulse">⚠️ Active Threat</div>
                     <div style="font-size: 1rem; color: #7f1d1d; font-weight: 700; line-height: 1.4;">NODE-04: Shear slip detected on Panel LW-104.</div>
                 </div>
             """, unsafe_allow_html=True)
 
-        st.markdown("<span style='font-size: 0.85rem; color: #000000; font-weight: 900; text-transform: uppercase;'>Mesh Polling Frequency</span>", unsafe_allow_html=True)
-        st.select_slider("Polling", options=["5 sec", "30 sec", "1 min", "5 min"], value="1 min", label_visibility="collapsed")
-        
         st.markdown(f"""
-            <div style="text-align: center; color: #475569; font-size: 0.85rem; font-weight: 800; margin-top: 40px;">
-                SYSTEM TIME: {datetime.now().strftime('%H:%M • %b %d')}
+            <div style="text-align: center; color: #475569; font-size: 1.1rem; font-weight: 900; font-family: monospace; margin-top: 40px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc;">
+                {datetime.now().strftime('%H:%M:%S')} <span style="font-size:0.8rem; color:#94a3b8;">• {datetime.now().strftime('%b %d')}</span>
             </div>
         """, unsafe_allow_html=True)
 
     # ==============================================================================================
     # MAIN HEADER
     # ==============================================================================================
-    st.markdown("""
-        <div style="margin-bottom: 32px;">
-            <h1 style="margin-bottom: 4px; color: #000000; font-size: 2.2rem; font-weight: 900;">Hello Admin!</h1>
-            <p style="color: #334155; font-size: 1.1rem; font-weight: 600;">Monitor live subsidence telemetry, active mesh nodes, and AI-driven warnings.</p>
+    st.markdown(f"""
+        <div style="margin-bottom: 32px; display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <h1 style="margin-bottom: 4px; color: #000000; font-size: 2.2rem; font-weight: 900;">Hello Admin!</h1>
+                <p style="color: #334155; font-size: 1.1rem; font-weight: 600;">Monitor live subsidence telemetry, active mesh nodes, and AI-driven warnings.</p>
+            </div>
+            {f'<div class="status-pill-red live-pulse" style="font-size: 1rem; border: 2px solid #dc2626;">🔴 LIVE SYSTEM ACTIVE</div>' if live_mode else '<div class="status-pill-green" style="font-size: 1rem; border: 2px solid #16a34a;">⏸️ SYSTEM PAUSED</div>'}
         </div>
     """, unsafe_allow_html=True)
 
     # ==============================================================================================
-    # MODULE A: LIVE GIS MAP (Esri Satellite Set as Default)
+    # MODULE A: LIVE GIS MAP 
     # ==============================================================================================
     if app_mode == "🌍 Live GIS Map":
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -392,8 +284,6 @@ def main():
         st.markdown('<div class="glass-card"><h3>🌍 Spatial Mesh Topology</h3>', unsafe_allow_html=True)
         
         map_ctrl_c1, map_ctrl_c2, map_ctrl_c3 = st.columns([2, 2, 2])
-        
-        # FIXED: Esri Satellite set as DEFAULT (First option in list)
         with map_ctrl_c1: map_tile_choice = st.selectbox("Select Basemap Layer (View Style)", ["Esri Satellite", "CartoDB positron", "OpenStreetMap"], index=0)
         with map_ctrl_c2: show_mesh_links = st.checkbox("🔗 Render Wireless Mesh Links", value=True)
         with map_ctrl_c3: show_hazard_zones = st.checkbox("⚠️ Show Mining Hazard Polygons", value=True)
@@ -467,10 +357,10 @@ def main():
         curr_vibe = primary_data['vibration_rms'].iloc[-1]
         curr_batt = primary_data['battery_pct'].iloc[-1]
 
-        with m_col1: st.markdown(f'<div class="soft-metric soft-metric-{"danger" if curr_tilt > 3.5 else "info"}"><div class="metric-title">Tilt Magnitude</div><div class="metric-value">{curr_tilt}°</div><div class="metric-sub">Δ 24h: {tilt_delta:+}°</div></div>', unsafe_allow_html=True)
-        with m_col2: st.markdown(f'<div class="soft-metric soft-metric-{"danger" if curr_disp > 20 else "warning"}"><div class="metric-title">Displacement</div><div class="metric-value">{curr_disp} mm</div><div class="metric-sub">Δ 24h: {disp_delta:+} mm</div></div>', unsafe_allow_html=True)
-        with m_col3: st.markdown(f'<div class="soft-metric soft-metric-{"danger" if curr_rate > 1.5 else "info"}"><div class="metric-title">Subsidence Velocity</div><div class="metric-value">{curr_rate} mm/h</div><div class="metric-sub">State: {"ACCELERATING" if curr_rate > 1.0 else "STEADY"}</div></div>', unsafe_allow_html=True)
-        with m_col4: st.markdown(f'<div class="soft-metric soft-metric-{"danger" if curr_vibe > 0.25 else "success"}"><div class="metric-title">Vibration (RMS)</div><div class="metric-value">{curr_vibe:.3f} g</div><div class="metric-sub">Micro-seismic Energy</div></div>', unsafe_allow_html=True)
+        with m_col1: st.markdown(f'<div class="soft-metric soft-metric-{"danger" if curr_tilt > 3.5 else "info"}"><div class="metric-title">Tilt Magnitude</div><div class="metric-value">{curr_tilt:.3f}°</div><div class="metric-sub">Δ 24h: {tilt_delta:+.3f}°</div></div>', unsafe_allow_html=True)
+        with m_col2: st.markdown(f'<div class="soft-metric soft-metric-{"danger" if curr_disp > 20 else "warning"}"><div class="metric-title">Displacement</div><div class="metric-value">{curr_disp:.2f} mm</div><div class="metric-sub">Δ 24h: {disp_delta:+.2f} mm</div></div>', unsafe_allow_html=True)
+        with m_col3: st.markdown(f'<div class="soft-metric soft-metric-{"danger" if curr_rate > 1.5 else "info"}"><div class="metric-title">Subsidence Velocity</div><div class="metric-value">{curr_rate:.3f} mm/h</div><div class="metric-sub">State: {"ACCELERATING" if curr_rate > 1.0 else "STEADY"}</div></div>', unsafe_allow_html=True)
+        with m_col4: st.markdown(f'<div class="soft-metric soft-metric-{"danger" if curr_vibe > 0.25 else "success"}"><div class="metric-title">Vibration (RMS)</div><div class="metric-value">{curr_vibe:.4f} g</div><div class="metric-sub">Micro-seismic Energy</div></div>', unsafe_allow_html=True)
         with m_col5: st.markdown(f'<div class="soft-metric soft-metric-success"><div class="metric-title">Power Status</div><div class="metric-value">{curr_batt}%</div><div class="metric-sub">Voltage: {primary_data["battery_v"].iloc[-1]}V</div></div>', unsafe_allow_html=True)
         
         st.markdown("---")
@@ -511,22 +401,17 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
 
         # ==============================================================================================
-        # AI FORECASTING ENGINE - TIMESFM 2.5
+        # AI FORECASTING ENGINE - TIMESFM 2.5 (CACHED MODEL WEIGHTS)
         # ==============================================================================================
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.markdown(f"#### 🔮 AI Displacement Forecast (Next 8 Hours) • {selected_node}")
 
         @st.cache_resource(show_spinner=False)
         def load_timesfm_engine():
-            # Optimize matrix multiplication for modern hardware
             torch.set_float32_matmul_precision("high")
-            
-            # Load the open-source 2.5 PyTorch model using explicit submodule import
             model = timesfm_2p5_torch.TimesFM_2p5_200M_torch.from_pretrained(
                 "google/timesfm-2.5-200m-pytorch"
             )
-            
-            # Compile the configuration for zero-shot forecasting
             model.compile(
                 timesfm.ForecastConfig(
                     max_context=1024,
@@ -534,57 +419,46 @@ def main():
                     normalize_inputs=True,
                     use_continuous_quantile_head=True,
                     force_flip_invariance=True,
-                    infer_is_positive=True, # Subsidence cannot be negative
-                    fix_quantile_crossing=True, # Keeps confidence bands mathematically stable
+                    infer_is_positive=True,
+                    fix_quantile_crossing=True,
                 )
             )
             return model
 
         timesfm_model = load_timesfm_engine()
-
-        # Isolate the target node's recent displacement history
         context_data = primary_data['displacement_mm'].values.astype(np.float32)
 
-        with st.spinner("TimesFM 2.5 is analyzing structural creep..."):
-            # Generate a 48-step forecast (48 * 10 mins = 8 hours)
-            point_forecast, quantile_forecast = timesfm_model.forecast(
-                horizon=48, 
-                inputs=[context_data]
-            )
+        # Hide spinner during live mode to prevent UI flashing
+        if not live_mode:
+            st.info("AI Engine dynamically computing probability trajectories...", icon="🧠")
             
-            # Extract median forecast and the 10th/90th percentile boundary limits
-            forecast_median = point_forecast[0] 
-            q10_bounds = quantile_forecast[0, :, 1]
-            q90_bounds = quantile_forecast[0, :, 9]
+        point_forecast, quantile_forecast = timesfm_model.forecast(
+            horizon=48, 
+            inputs=[context_data]
+        )
+        
+        forecast_median = point_forecast[0] 
+        q10_bounds = quantile_forecast[0, :, 1]
+        q90_bounds = quantile_forecast[0, :, 9]
 
-        # Generate future timestamps for the X-axis
         future_timestamps = pd.date_range(
             start=primary_data['timestamp'].iloc[-1], periods=49, freq='10min'
         )[1:]
 
-        # Plot the Historical Data, AI Forecast, and Risk Interval
         fig_forecast = go.Figure()
-
-        # Plot historical context (last 144 frames)
         fig_forecast.add_trace(go.Scatter(
             x=primary_data['timestamp'][-144:], y=context_data[-144:], 
             name="Historical Displacement", line=dict(color='#2563eb', width=3)
         ))
-
-        # Plot future AI median forecast
         fig_forecast.add_trace(go.Scatter(
             x=future_timestamps, y=forecast_median, 
             name="TimesFM Forecast", line=dict(color='#ea580c', width=3, dash='dash')
         ))
-
-        # Plot the Upper 90% Risk Band
         fig_forecast.add_trace(go.Scatter(
             x=future_timestamps, y=q90_bounds,
             name="Upper Risk Bound (90th Pct)", line=dict(color='rgba(220, 38, 38, 0.4)', width=1), 
             showlegend=False
         ))
-
-        # Plot the Lower 10% Bound and fill the gap
         fig_forecast.add_trace(go.Scatter(
             x=future_timestamps, y=q10_bounds, 
             name="Forecast Confidence Interval", line=dict(color='rgba(220, 38, 38, 0.4)', width=1),
@@ -766,6 +640,16 @@ def main():
             st.plotly_chart(fig_rssi, use_container_width=True)
             
         st.markdown('</div>', unsafe_allow_html=True)
+
+    # ==============================================================================================
+    # REAL-TIME LOOP EXECUTION (Auto-Rerun System)
+    # ==============================================================================================
+    if live_mode:
+        poll_map = {"2 sec": 2, "5 sec": 5, "10 sec": 10, "30 sec": 30}
+        sleep_duration = poll_map.get(polling_val, 5)
+        
+        time.sleep(sleep_duration)
+        st.rerun()
 
 if __name__ == "__main__":
     main()
