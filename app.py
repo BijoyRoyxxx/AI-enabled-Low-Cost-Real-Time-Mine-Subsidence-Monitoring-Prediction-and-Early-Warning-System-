@@ -8,6 +8,9 @@ High Contrast Edition (Dropdown Visibility & Esri Satellite Default Fix)
 import streamlit as st
 import pandas as pd
 import numpy as np
+import torch
+import timesfm
+import timesfm.timesfm_2p5.timesfm_2p5_torch as timesfm_2p5_torch
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -506,6 +509,98 @@ def main():
             st.plotly_chart(fig_tilt, use_container_width=True)
             
         st.markdown('</div>', unsafe_allow_html=True)
+
+        # ==============================================================================================
+        # AI FORECASTING ENGINE - TIMESFM 2.5
+        # ==============================================================================================
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.markdown(f"#### 🔮 AI Displacement Forecast (Next 8 Hours) • {selected_node}")
+
+        @st.cache_resource(show_spinner=False)
+        def load_timesfm_engine():
+            # Optimize matrix multiplication for modern hardware
+            torch.set_float32_matmul_precision("high")
+            
+            # Load the open-source 2.5 PyTorch model using explicit submodule import
+            model = timesfm_2p5_torch.TimesFM_2p5_200M_torch.from_pretrained(
+                "google/timesfm-2.5-200m-pytorch"
+            )
+            
+            # Compile the configuration for zero-shot forecasting
+            model.compile(
+                timesfm.ForecastConfig(
+                    max_context=1024,
+                    max_horizon=256,
+                    normalize_inputs=True,
+                    use_continuous_quantile_head=True,
+                    force_flip_invariance=True,
+                    infer_is_positive=True, # Subsidence cannot be negative
+                    fix_quantile_crossing=True, # Keeps confidence bands mathematically stable
+                )
+            )
+            return model
+
+        timesfm_model = load_timesfm_engine()
+
+        # Isolate the target node's recent displacement history
+        context_data = primary_data['displacement_mm'].values.astype(np.float32)
+
+        with st.spinner("TimesFM 2.5 is analyzing structural creep..."):
+            # Generate a 48-step forecast (48 * 10 mins = 8 hours)
+            point_forecast, quantile_forecast = timesfm_model.forecast(
+                horizon=48, 
+                inputs=[context_data]
+            )
+            
+            # Extract median forecast and the 10th/90th percentile boundary limits
+            forecast_median = point_forecast[0] 
+            q10_bounds = quantile_forecast[0, :, 1]
+            q90_bounds = quantile_forecast[0, :, 9]
+
+        # Generate future timestamps for the X-axis
+        future_timestamps = pd.date_range(
+            start=primary_data['timestamp'].iloc[-1], periods=49, freq='10min'
+        )[1:]
+
+        # Plot the Historical Data, AI Forecast, and Risk Interval
+        fig_forecast = go.Figure()
+
+        # Plot historical context (last 144 frames)
+        fig_forecast.add_trace(go.Scatter(
+            x=primary_data['timestamp'][-144:], y=context_data[-144:], 
+            name="Historical Displacement", line=dict(color='#2563eb', width=3)
+        ))
+
+        # Plot future AI median forecast
+        fig_forecast.add_trace(go.Scatter(
+            x=future_timestamps, y=forecast_median, 
+            name="TimesFM Forecast", line=dict(color='#ea580c', width=3, dash='dash')
+        ))
+
+        # Plot the Upper 90% Risk Band
+        fig_forecast.add_trace(go.Scatter(
+            x=future_timestamps, y=q90_bounds,
+            name="Upper Risk Bound (90th Pct)", line=dict(color='rgba(220, 38, 38, 0.4)', width=1), 
+            showlegend=False
+        ))
+
+        # Plot the Lower 10% Bound and fill the gap
+        fig_forecast.add_trace(go.Scatter(
+            x=future_timestamps, y=q10_bounds, 
+            name="Forecast Confidence Interval", line=dict(color='rgba(220, 38, 38, 0.4)', width=1),
+            fill='tonexty', fillcolor='rgba(234, 88, 12, 0.15)'
+        ))
+
+        fig_forecast.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=380, 
+            margin=dict(l=0, r=0, t=10, b=0),
+            xaxis=dict(showgrid=True, gridcolor="#e2e8f0"), 
+            yaxis=dict(gridcolor="#cbd5e1", title="Displacement (mm)"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1)
+        )
+
+        st.plotly_chart(fig_forecast, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         
         c_vibe, c_rate = st.columns(2)
         with c_vibe:
@@ -532,7 +627,7 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ==============================================================================================
-    # MODULE C: AI ENGINE & 3D ANALYTICS
+    # MODULE C: AI ENGINE & 3D Analytics
     # ==============================================================================================
     elif app_mode == "🧠 AI & 3D Analytics":
         
