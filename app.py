@@ -1,7 +1,7 @@
 """
 ====================================================================================================
 GEO-SHIELD | Mine Subsidence Monitoring & Control Dashboard
-High Contrast & Advanced Visuals Edition
+High Contrast & Advanced Visuals Edition (Dropdown Fix)
 ====================================================================================================
 """
 
@@ -12,7 +12,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import folium
-from folium import plugins
 from streamlit_folium import st_folium
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
@@ -93,7 +92,6 @@ def generate_synthetic_telemetry(hours: int = 24, interval_minutes: int = 10):
                 vibe_rms = 0.015 + np.random.normal(0, 0.004)
 
             tilt_mag = np.sqrt(tilt_x**2 + tilt_y**2)
-            solar_hour = (ts.hour + ts.minute / 60.0)
             batt_pct = node["battery_pct"]
             
             records.append({
@@ -153,7 +151,7 @@ def train_and_detect_anomalies(df: pd.DataFrame, contamination: float = 0.05, cr
 def main():
     st.set_page_config(page_title="GEO-SHIELD Hub", page_icon="📡", layout="wide", initial_sidebar_state="expanded")
 
-    # High Contrast UI CSS (Fixing faint text issues)
+    # High Contrast UI CSS & Fix for Dropdown visibility
     st.markdown("""
     <style>
         /* Base App Styling - Forcing High Contrast Dark Text on Light Background */
@@ -167,12 +165,40 @@ def main():
         h1, h2, h3, h4, h5 { color: #000000 !important; font-weight: 800 !important; letter-spacing: -0.01em; margin-bottom: 12px; }
         p, span, div { color: #111827; }
         
-        /* Force Streamlit Labels (Sliders, Selectboxes) to be BOLD and BLACK */
+        /* Force Streamlit Labels to be BOLD and BLACK */
         .stSlider label, .stSelectbox label, .stCheckbox label, div[data-testid="stMarkdownContainer"] p { 
             font-weight: 800 !important; 
             color: #000000 !important; 
             font-size: 1.05rem !important; 
         }
+
+        /* ---------------------------------------------------------
+           CRITICAL FIX: Dropdown Menu Visibility overrides
+           Forces the options inside the selectbox to be black on white
+        --------------------------------------------------------- */
+        div[data-baseweb="select"] > div { 
+            background-color: #ffffff !important; 
+            border-color: #cbd5e1 !important; 
+        }
+        
+        /* Targets the actual list items in the dropdown portal */
+        ul[role="listbox"] {
+            background-color: #ffffff !important;
+        }
+        ul[role="listbox"] li[role="option"] {
+            background-color: #ffffff !important;
+            color: #000000 !important;
+            font-weight: 600 !important;
+        }
+        ul[role="listbox"] li[role="option"]:hover, 
+        ul[role="listbox"] li[role="option"][aria-selected="true"] {
+            background-color: #f1f5f9 !important;
+            color: #1d4ed8 !important;
+        }
+        div[data-baseweb="popover"] > div {
+            background-color: #ffffff !important;
+        }
+        /* --------------------------------------------------------- */
         
         /* Sidebar Styling */
         [data-testid="stSidebar"] {
@@ -379,7 +405,7 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ==============================================================================================
-    # MODULE B: TELEMETRY & VISUALS (Added Radar Chart Graphic)
+    # MODULE B: TELEMETRY & VISUALS
     # ==============================================================================================
     elif app_mode == "📈 Telemetry & Visuals":
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
@@ -410,7 +436,6 @@ def main():
         
         st.markdown("---")
 
-        # NEW GRAPHICAL VISUAL: Node Multi-variate Radar Profile
         st.markdown(f"#### 🕸️ Node Health Profile (Radar Graphic) • {selected_node}")
         
         max_vals = raw_telemetry_df[['tilt_mag', 'displacement_mm', 'disp_rate_mmh', 'vibration_rms']].max()
@@ -510,7 +535,6 @@ def main():
             st.markdown('</div>', unsafe_allow_html=True)
             
         with c2:
-            # NEW GRAPHICAL VISUAL: 3D Scatter for AI Clustering
             st.markdown('<div class="glass-card"><h4>🌌 3D Anomaly Clustering Matrix</h4>', unsafe_allow_html=True)
             fig_3d = px.scatter_3d(
                 analyzed_df, x="tilt_mag", y="displacement_mm", z="vibration_rms", color="severity", 
