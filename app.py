@@ -1,7 +1,7 @@
 """
 ====================================================================================================
 GEO-SHIELD | Mine Subsidence Monitoring & Control Dashboard
-High Contrast Edition (Anti-Flicker PyDeck Map & Syntax Patched)
+High Contrast Edition (Flicker-Free Keys & Plotly Satellite)
 ====================================================================================================
 """
 
@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import pydeck as pdk
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 import streamlit as st
@@ -723,139 +722,160 @@ def main():
             "⚠️ Show Mining Hazard Polygons", value=True, key="map3"
         )
 
-      # --- PyDeck Flicker-Free Map Construction ---
-      
-      # 1. Hazard Polygons
-      polygon_data = []
+      # Scattermap Plotly Construction
+      fig_map = go.Figure()
+
       if show_hazard_zones:
-        polygon_data = [
-            {
-                "zone_name": "Open-Cut Mine Boundary",
-                "coordinates": [[[BASE_LON - 0.0045, BASE_LAT + 0.0055],
-                                 [BASE_LON + 0.0055, BASE_LAT + 0.0055],
-                                 [BASE_LON + 0.0060, BASE_LAT - 0.0048],
-                                 [BASE_LON - 0.0045, BASE_LAT - 0.0048]]],
-                "fill_color": [59, 130, 246, 30],
-                "line_color": [29, 78, 216, 255]
-            },
-            {
-                "zone_name": "CRITICAL: Panel LW-104",
-                "coordinates": [[[BASE_LON - 0.0042, BASE_LAT - 0.0010],
-                                 [BASE_LON - 0.0018, BASE_LAT - 0.0010],
-                                 [BASE_LON - 0.0005, BASE_LAT - 0.0045],
-                                 [BASE_LON - 0.0042, BASE_LAT - 0.0045]]],
-                "fill_color": [239, 68, 68, 60], 
-                "line_color": [185, 28, 28, 255]
-            }
-        ]
+        fig_map.add_trace(
+            go.Scattermap(
+                mode="lines",
+                fill="toself",
+                lon=[
+                    BASE_LON - 0.0045,
+                    BASE_LON + 0.0055,
+                    BASE_LON + 0.0060,
+                    BASE_LON - 0.0045,
+                    BASE_LON - 0.0045,
+                ],
+                lat=[
+                    BASE_LAT + 0.0055,
+                    BASE_LAT + 0.0055,
+                    BASE_LAT - 0.0048,
+                    BASE_LAT - 0.0048,
+                    BASE_LAT + 0.0055,
+                ],
+                fillcolor="rgba(59, 130, 246, 0.1)",
+                line=dict(color="#1d4ed8", width=2),
+                name="Open-Cut Mine Boundary",
+                hoverinfo="name",
+            )
+        )
+        fig_map.add_trace(
+            go.Scattermap(
+                mode="lines",
+                fill="toself",
+                lon=[
+                    BASE_LON - 0.0042,
+                    BASE_LON - 0.0018,
+                    BASE_LON - 0.0005,
+                    BASE_LON - 0.0042,
+                    BASE_LON - 0.0042,
+                ],
+                lat=[
+                    BASE_LAT - 0.0010,
+                    BASE_LAT - 0.0010,
+                    BASE_LAT - 0.0045,
+                    BASE_LAT - 0.0045,
+                    BASE_LAT - 0.0010,
+                ],
+                fillcolor="rgba(239, 68, 68, 0.25)",
+                line=dict(color="#b91c1c", width=3),
+                name="CRITICAL: Panel LW-104",
+                hoverinfo="name",
+            )
+        )
 
-      # 2. Mesh Links
-      links_data = []
       if show_mesh_links:
-        node_lookup = {n["node_id"]: {"lat": n["lat"], "lon": n["lon"], "snr": n.get("snr", 10)} for n in NODES_TOPOLOGY}
-        node_lookup["GW-CENTRAL"] = {"lat": GATEWAY_INFO["lat"], "lon": GATEWAY_INFO["lon"], "snr": 10}
-
+        node_lookup = {n["node_id"]: n for n in NODES_TOPOLOGY}
+        node_lookup["GW-CENTRAL"] = {
+            "lat": GATEWAY_INFO["lat"],
+            "lon": GATEWAY_INFO["lon"],
+        }
         for node in NODES_TOPOLOGY:
-            if node["parent"] in node_lookup:
-                parent = node_lookup[node["parent"]]
-                color = [21, 128, 61, 255] # STABLE green
-                if node["snr"] <= 4.0: color = [185, 28, 28, 255]
-                elif node["snr"] <= 7.0: color = [180, 83, 9, 255]
+          if node["parent"] in node_lookup:
+            parent = node_lookup[node["parent"]]
+            link_color = (
+                "#15803d"
+                if node["snr"] > 7.0
+                else ("#b45309" if node["snr"] > 4.0 else "#b91c1c")
+            )
+            fig_map.add_trace(
+                go.Scattermap(
+                    mode="lines",
+                    lon=[node["lon"], parent["lon"]],
+                    lat=[node["lat"], parent["lat"]],
+                    line=dict(color=link_color, width=2),
+                    showlegend=False,
+                    hoverinfo="none",
+                )
+            )
 
-                links_data.append({
-                    "source": [node["lon"], node["lat"]],
-                    "target": [parent["lon"], parent["lat"]],
-                    "color": color
-                })
+      # Central Gateway
+      fig_map.add_trace(
+          go.Scattermap(
+              mode="markers+text",
+              lon=[GATEWAY_INFO["lon"]],
+              lat=[GATEWAY_INFO["lat"]],
+              marker=dict(size=20, color="#1d4ed8"),
+              text=["GW-CENTRAL"],
+              textposition="top center",
+              name="Master Gateway",
+              hoverinfo="name",
+          )
+      )
 
-      # 3. Nodes Data
-      nodes_data = []
-      for _, r in latest_analyzed.iterrows():
-        color = [22, 163, 74, 255] # STABLE green
-        if r['severity'] == "CRITICAL": color = [220, 38, 38, 255]
-        elif r['severity'] == "WARNING": color = [234, 88, 12, 255]
-        elif r['severity'] == "ELEVATED": color = [126, 34, 206, 255]
+      # Sensor Nodes
+      colors = latest_analyzed["severity"].map({
+          "CRITICAL": "#dc2626",
+          "WARNING": "#ea580c",
+          "ELEVATED": "#7e22ce",
+          "STABLE": "#16a34a",
+      })
+      hover_texts = latest_analyzed.apply(
+          lambda r: (
+              f"<b>{r['node_id']}</b><br>Status: {r['severity']}<br>Tilt:"
+              f" {r['tilt_mag']}°<br>Disp: {r['displacement_mm']} mm<br>Vibe:"
+              f" {r['vibration_rms']} g"
+          ),
+          axis=1,
+      )
 
-        nodes_data.append({
-            "name": r["node_id"].split("-")[1],
-            "lon": r["lon"],
-            "lat": r["lat"],
-            "color": color,
-            "radius": 40,
-            "tooltip": f"Node: {r['node_id']}\nStatus: {r['severity']}\nTilt: {r['tilt_mag']}°\nDisp: {r['displacement_mm']} mm"
-        })
+      fig_map.add_trace(
+          go.Scattermap(
+              mode="markers+text",
+              lon=latest_analyzed["lon"],
+              lat=latest_analyzed["lat"],
+              marker=dict(size=14, color=colors),
+              text=latest_analyzed["node_id"].apply(lambda x: x.split("-")[1]),
+              textfont=dict(color="white", size=10, family="Arial Black"),
+              hovertext=hover_texts,
+              hoverinfo="text",
+              name="Sensor Nodes",
+          )
+      )
 
-      # 4. Gateway Data
-      gw_data = [{
-          "name": "GW",
-          "lon": GATEWAY_INFO["lon"],
-          "lat": GATEWAY_INFO["lat"],
-          "color": [29, 78, 216, 255],
-          "radius": 55,
-          "tooltip": "Master Gateway"
-      }]
-
-      # --- Construct Layers ---
-      layers = []
-
-      if show_hazard_zones:
-        layers.append(pdk.Layer(
-            "PolygonLayer",
-            data=polygon_data,
-            get_polygon="coordinates",
-            get_fill_color="fill_color",
-            get_line_color="line_color",
-            line_width_min_pixels=3,
-            stroked=True,
-            extruded=False
-        ))
-
-      if show_mesh_links:
-        layers.append(pdk.Layer(
-            "LineLayer",
-            data=links_data,
-            get_source_position="source",
-            get_target_position="target",
-            get_color="color",
-            get_width=4
-        ))
-
-      layers.append(pdk.Layer(
-          "ScatterplotLayer",
-          data=nodes_data + gw_data,
-          get_position="[lon, lat]",
-          get_fill_color="color",
-          get_radius="radius",
-          pickable=True,
-      ))
-
-      layers.append(pdk.Layer(
-          "TextLayer",
-          data=nodes_data + gw_data,
-          get_position="[lon, lat]",
-          get_text="name",
-          get_color=[255, 255, 255, 255],
-          get_size=13,
-          get_alignment_baseline="'bottom'",
-          get_pixel_offset=[0, -15]
-      ))
-
-      # Configure Base Map Style
+      map_style = "carto-positron"
+      map_layers = []
       if "Satellite" in map_tile_choice:
-        map_style = "mapbox://styles/mapbox/satellite-v9"
+        map_style = "white-bg"
+        map_layers = [{
+            "below": "traces",
+            "sourcetype": "raster",
+            "sourceattribution": "Esri",
+            "source": [
+                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            ],
+        }]
       elif "Dark" in map_tile_choice:
-        map_style = "dark"
-      else:
-        map_style = "light"
+        map_style = "carto-darkmatter"
 
-      view_state = pdk.ViewState(latitude=BASE_LAT, longitude=BASE_LON, zoom=14.5, pitch=0)
+      fig_map.update_layout(
+          uirevision="constant",  # Locks camera state across live re-renders to stop blinking
+          map=dict(
+              style=map_style,
+              layers=map_layers,
+              center=dict(lat=BASE_LAT, lon=BASE_LON),
+              zoom=14.5,
+          ),
+          margin={"r": 0, "t": 0, "l": 0, "b": 0},
+          height=550,
+          showlegend=False,
+          paper_bgcolor="rgba(0,0,0,0)",
+          plot_bgcolor="rgba(0,0,0,0)",
+      )
 
-      st.pydeck_chart(pdk.Deck(
-          map_style=map_style,
-          initial_view_state=view_state,
-          layers=layers,
-          tooltip={"text": "{tooltip}"}
-      ), use_container_width=True)
+      # KEY ADDED: Prevents Streamlit from destroying and flashing the iframe
+      st.plotly_chart(fig_map, use_container_width=True, key="live_map_chart")
       st.markdown("</div>", unsafe_allow_html=True)
 
       st.markdown(
@@ -1014,11 +1034,13 @@ def main():
                     tickfont=dict(size=13, color="#000", weight="bold")
                 ),
             ),
+            uirevision="constant",
             paper_bgcolor="rgba(0,0,0,0)",
             height=380,
             margin=dict(l=40, r=40, t=20, b=20),
         )
-        st.plotly_chart(fig_radar, use_container_width=True)
+        # KEY ADDED
+        st.plotly_chart(fig_radar, use_container_width=True, key="radar_chart")
 
       with c_tilt:
         fig_tilt = go.Figure()
@@ -1066,7 +1088,8 @@ def main():
             xaxis=dict(showgrid=True, gridcolor="#e2e8f0", title="Time"),
             yaxis=dict(gridcolor="#cbd5e1", title="Degrees (°)"),
         )
-        st.plotly_chart(fig_tilt, use_container_width=True)
+        # KEY ADDED
+        st.plotly_chart(fig_tilt, use_container_width=True, key="tilt_chart")
 
       st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1134,7 +1157,8 @@ def main():
               orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1
           ),
       )
-      st.plotly_chart(fig_forecast, use_container_width=True)
+      # KEY ADDED
+      st.plotly_chart(fig_forecast, use_container_width=True, key="forecast_chart")
       st.markdown("</div>", unsafe_allow_html=True)
 
       c_vibe, c_rate = st.columns(2)
@@ -1164,7 +1188,8 @@ def main():
             xaxis=dict(showgrid=True, gridcolor="#e2e8f0"),
             yaxis=dict(gridcolor="#cbd5e1"),
         )
-        st.plotly_chart(fig_vibe, use_container_width=True)
+        # KEY ADDED
+        st.plotly_chart(fig_vibe, use_container_width=True, key="vibe_chart")
         st.markdown("</div>", unsafe_allow_html=True)
 
       with c_rate:
@@ -1202,7 +1227,8 @@ def main():
                 orientation="h", y=1.1, title="", font=dict(color="#000")
             ),
         )
-        st.plotly_chart(fig_comp, use_container_width=True)
+        # KEY ADDED
+        st.plotly_chart(fig_comp, use_container_width=True, key="comp_chart")
         st.markdown("</div>", unsafe_allow_html=True)
 
       st.markdown('<div class="glass-card">', unsafe_allow_html=True)
@@ -1297,7 +1323,8 @@ def main():
             height=380,
             margin=dict(l=20, r=20, t=20, b=10),
         )
-        st.plotly_chart(fig_gauge, use_container_width=True)
+        # KEY ADDED
+        st.plotly_chart(fig_gauge, use_container_width=True, key="risk_gauge_chart")
         st.markdown("</div>", unsafe_allow_html=True)
 
       with c2:
@@ -1343,7 +1370,8 @@ def main():
             ),
             legend=dict(title="", font=dict(color="#000", size=14)),
         )
-        st.plotly_chart(fig_3d, use_container_width=True)
+        # KEY ADDED
+        st.plotly_chart(fig_3d, use_container_width=True, key="3d_cluster_chart")
         st.markdown("</div>", unsafe_allow_html=True)
 
       st.markdown(
@@ -1530,7 +1558,8 @@ def main():
             xaxis=dict(showgrid=False),
             yaxis=dict(gridcolor="#cbd5e1", range=[0, 100]),
         )
-        st.plotly_chart(fig_batt, use_container_width=True)
+        # KEY ADDED
+        st.plotly_chart(fig_batt, use_container_width=True, key="batt_level_chart")
       with c_b2:
         st.markdown("##### 📶 LoRa RSSI Signal Heatmap (dBm)")
         fig_rssi = px.bar(
@@ -1550,7 +1579,8 @@ def main():
             xaxis=dict(showgrid=False),
             yaxis=dict(gridcolor="#cbd5e1"),
         )
-        st.plotly_chart(fig_rssi, use_container_width=True)
+        # KEY ADDED
+        st.plotly_chart(fig_rssi, use_container_width=True, key="rssi_signal_chart")
 
       st.markdown("</div>", unsafe_allow_html=True)
 
