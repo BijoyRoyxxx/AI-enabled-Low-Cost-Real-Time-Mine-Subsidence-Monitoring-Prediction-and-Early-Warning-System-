@@ -1,7 +1,7 @@
 """
 ====================================================================================================
 GEO-SHIELD | Mine Subsidence Monitoring & Control Dashboard
-High Contrast & Advanced Visuals Edition (Dropdown Fix)
+High Contrast Edition (Dropdown Visibility & Esri Satellite Default Fix)
 ====================================================================================================
 """
 
@@ -151,55 +151,80 @@ def train_and_detect_anomalies(df: pd.DataFrame, contamination: float = 0.05, cr
 def main():
     st.set_page_config(page_title="GEO-SHIELD Hub", page_icon="📡", layout="wide", initial_sidebar_state="expanded")
 
-    # High Contrast UI CSS & Fix for Dropdown visibility
+    # Comprehensive High-Contrast & Dropdown Popover CSS Fix
     st.markdown("""
     <style>
-        /* Base App Styling - Forcing High Contrast Dark Text on Light Background */
+        /* Global Background & Core Text */
         .stApp { 
-            background: #f4f6f9; 
+            background: #f4f6f9 !important; 
             color: #000000 !important; 
             font-family: 'Inter', 'Segoe UI', sans-serif; 
         }
         
-        /* Typography Enforcement */
+        /* Headings & Paragraph Enforcement */
         h1, h2, h3, h4, h5 { color: #000000 !important; font-weight: 800 !important; letter-spacing: -0.01em; margin-bottom: 12px; }
         p, span, div { color: #111827; }
         
-        /* Force Streamlit Labels to be BOLD and BLACK */
+        /* Force Streamlit Control Labels */
         .stSlider label, .stSelectbox label, .stCheckbox label, div[data-testid="stMarkdownContainer"] p { 
             font-weight: 800 !important; 
             color: #000000 !important; 
             font-size: 1.05rem !important; 
         }
 
-        /* ---------------------------------------------------------
-           CRITICAL FIX: Dropdown Menu Visibility overrides
-           Forces the options inside the selectbox to be black on white
-        --------------------------------------------------------- */
+        /* =========================================================================
+           COMPLETE DROPDOWN & POPOVER VISIBILITY OVERRIDE
+           Fixes dark-background / black-text popover issue across all portals
+           ========================================================================= */
+        /* Select Box Container Header */
         div[data-baseweb="select"] > div { 
             background-color: #ffffff !important; 
-            border-color: #cbd5e1 !important; 
+            border: 2px solid #94a3b8 !important;
+            color: #000000 !important;
+            border-radius: 8px !important;
         }
         
-        /* Targets the actual list items in the dropdown portal */
-        ul[role="listbox"] {
-            background-color: #ffffff !important;
+        /* Selected Value inside control */
+        div[data-baseweb="select"] * {
+            color: #000000 !important;
+            font-weight: 700 !important;
         }
-        ul[role="listbox"] li[role="option"] {
+
+        /* Floating Popover Container & Menus attached to document root */
+        div[data-baseweb="popover"], 
+        div[data-baseweb="menu"], 
+        ul[role="listbox"],
+        div[id^="bwb-"] {
+            background-color: #ffffff !important;
+            border: 2px solid #64748b !important;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.25) !important;
+        }
+        
+        /* Individual Dropdown Options */
+        li[role="option"], 
+        div[role="option"],
+        ul[role="listbox"] li {
             background-color: #ffffff !important;
             color: #000000 !important;
-            font-weight: 600 !important;
+            font-weight: 700 !important;
+            font-size: 0.95rem !important;
+            padding: 10px 14px !important;
         }
-        ul[role="listbox"] li[role="option"]:hover, 
-        ul[role="listbox"] li[role="option"][aria-selected="true"] {
-            background-color: #f1f5f9 !important;
+        
+        /* Hover and Active/Selected Options */
+        li[role="option"]:hover, 
+        li[role="option"][aria-selected="true"],
+        div[role="option"]:hover {
+            background-color: #dbeafe !important;
             color: #1d4ed8 !important;
         }
-        div[data-baseweb="popover"] > div {
-            background-color: #ffffff !important;
-        }
-        /* --------------------------------------------------------- */
         
+        /* Dropdown arrow icon color */
+        div[data-baseweb="select"] svg {
+            fill: #000000 !important;
+        }
+        /* ========================================================================= */
+
         /* Sidebar Styling */
         [data-testid="stSidebar"] {
             background-color: #ffffff;
@@ -207,7 +232,7 @@ def main():
             box-shadow: 4px 0 20px rgba(0, 0, 0, 0.05);
         }
         
-        /* High Contrast Floating Cards */
+        /* High Contrast Cards */
         .glass-card {
             background: #ffffff;
             border-radius: 16px;
@@ -217,7 +242,7 @@ def main():
             margin-bottom: 24px;
         }
         
-        /* Pill Box KPI Cards (High Legibility) */
+        /* Pill Box KPI Cards */
         .pill-box {
             display: flex;
             align-items: center;
@@ -351,7 +376,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # ==============================================================================================
-    # MODULE A: LIVE GIS MAP
+    # MODULE A: LIVE GIS MAP (Esri Satellite Set as Default)
     # ==============================================================================================
     if app_mode == "🌍 Live GIS Map":
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -364,12 +389,23 @@ def main():
         st.markdown('<div class="glass-card"><h3>🌍 Spatial Mesh Topology</h3>', unsafe_allow_html=True)
         
         map_ctrl_c1, map_ctrl_c2, map_ctrl_c3 = st.columns([2, 2, 2])
-        with map_ctrl_c1: map_tile_choice = st.selectbox("Select Basemap Layer (View Style)", ["CartoDB positron", "OpenStreetMap", "Esri Satellite"], index=0)
+        
+        # FIXED: Esri Satellite set as DEFAULT (First option in list)
+        with map_ctrl_c1: map_tile_choice = st.selectbox("Select Basemap Layer (View Style)", ["Esri Satellite", "CartoDB positron", "OpenStreetMap"], index=0)
         with map_ctrl_c2: show_mesh_links = st.checkbox("🔗 Render Wireless Mesh Links", value=True)
         with map_ctrl_c3: show_hazard_zones = st.checkbox("⚠️ Show Mining Hazard Polygons", value=True)
         
-        tiles_layer = "CartoDB positron" if "positron" in map_tile_choice else ("OpenStreetMap" if "OpenStreetMap" in map_tile_choice else "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}")
-        m = folium.Map(location=[BASE_LAT, BASE_LON], zoom_start=15, tiles=tiles_layer, attr="Esri World Imagery" if "Satellite" in map_tile_choice else None)
+        if "Satellite" in map_tile_choice:
+            tiles_layer = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            tile_attr = "Esri World Imagery"
+        elif "positron" in map_tile_choice:
+            tiles_layer = "CartoDB positron"
+            tile_attr = None
+        else:
+            tiles_layer = "OpenStreetMap"
+            tile_attr = None
+
+        m = folium.Map(location=[BASE_LAT, BASE_LON], zoom_start=15, tiles=tiles_layer, attr=tile_attr)
 
         if show_hazard_zones:
             folium.Polygon(locations=[[BASE_LAT + 0.0055, BASE_LON - 0.0045], [BASE_LAT + 0.0055, BASE_LON + 0.0055], [BASE_LAT - 0.0048, BASE_LON + 0.0060], [BASE_LAT - 0.0048, BASE_LON - 0.0045], [BASE_LAT + 0.0055, BASE_LON - 0.0045]], color="#1d4ed8", weight=2, dash_array="5, 5", fill=True, fill_color="#3b82f6", fill_opacity=0.1, tooltip="Open-Cut Mine Boundary").add_to(m)
