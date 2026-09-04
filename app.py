@@ -1,7 +1,7 @@
 """
 ====================================================================================================
 GEO-SHIELD | Mine Subsidence Monitoring & Control Dashboard
-High Contrast Edition (Anti-Flicker Plotly Map)
+High Contrast Edition (Anti-Flicker Plotly Map & Syntax Patched)
 ====================================================================================================
 """
 
@@ -933,6 +933,7 @@ def main():
       st.markdown("#### 📐 High-Contrast Telemetry Snapshot")
       m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
 
+      # Extract current values and deltas
       curr_tilt = primary_data["tilt_mag"].iloc[-1]
       tilt_delta = round(curr_tilt - primary_data["tilt_mag"].iloc[0], 3)
       curr_disp = primary_data["displacement_mm"].iloc[-1]
@@ -941,47 +942,51 @@ def main():
       curr_vibe = primary_data["vibration_rms"].iloc[-1]
       curr_batt = primary_data["battery_pct"].iloc[-1]
 
+      # Pre-compute CSS classes to avoid f-string parsing errors across lines
+      tilt_class = "danger" if curr_tilt > 3.5 else "info"
+      disp_class = "danger" if curr_disp > 20 else "warning"
+      rate_class = "danger" if curr_rate > 1.5 else "info"
+      rate_state = "ACCELERATING" if curr_rate > 1.0 else "STEADY"
+      vibe_class = "danger" if curr_vibe > 0.25 else "success"
+
       with m_col1:
         st.markdown(
-            f'<div class="soft-metric soft-metric-{"danger" if curr_tilt > 3.5'
-            ' else "info"}"><div class="metric-title">Tilt'
-            f' Magnitude</div><div class="metric-value">{curr_tilt:.3f}°</div><div'
-            f' class="metric-sub">Δ 24h: {tilt_delta:+.3f}°</div></div>',
+            f'<div class="soft-metric soft-metric-{tilt_class}">'
+            f'<div class="metric-title">Tilt Magnitude</div>'
+            f'<div class="metric-value">{curr_tilt:.3f}°</div>'
+            f'<div class="metric-sub">Δ 24h: {tilt_delta:+.3f}°</div></div>',
             unsafe_allow_html=True,
         )
       with m_col2:
         st.markdown(
-            f'<div class="soft-metric soft-metric-{"danger" if curr_disp > 20'
-            ' else "warning"}"><div'
-            ' class="metric-title">Displacement</div><div'
-            f' class="metric-value">{curr_disp:.2f} mm</div><div'
-            f' class="metric-sub">Δ 24h: {disp_delta:+.2f} mm</div></div>',
+            f'<div class="soft-metric soft-metric-{disp_class}">'
+            f'<div class="metric-title">Displacement</div>'
+            f'<div class="metric-value">{curr_disp:.2f} mm</div>'
+            f'<div class="metric-sub">Δ 24h: {disp_delta:+.2f} mm</div></div>',
             unsafe_allow_html=True,
         )
       with m_col3:
         st.markdown(
-            f'<div class="soft-metric soft-metric-{"danger" if curr_rate > 1.5'
-            ' else "info"}"><div class="metric-title">Subsidence'
-            f' Velocity</div><div class="metric-value">{curr_rate:.3f}'
-            ' mm/h</div><div class="metric-sub">State:'
-            f' {"ACCELERATING" if curr_rate > 1.0 else "STEADY"}</div></div>',
+            f'<div class="soft-metric soft-metric-{rate_class}">'
+            f'<div class="metric-title">Subsidence Velocity</div>'
+            f'<div class="metric-value">{curr_rate:.3f} mm/h</div>'
+            f'<div class="metric-sub">State: {rate_state}</div></div>',
             unsafe_allow_html=True,
         )
       with m_col4:
         st.markdown(
-            f'<div class="soft-metric soft-metric-{"danger" if curr_vibe > 0.25'
-            ' else "success"}"><div class="metric-title">Vibration'
-            f' (RMS)</div><div class="metric-value">{curr_vibe:.4f} g</div><div'
-            ' class="metric-sub">Micro-seismic Energy</div></div>',
+            f'<div class="soft-metric soft-metric-{vibe_class}">'
+            f'<div class="metric-title">Vibration (RMS)</div>'
+            f'<div class="metric-value">{curr_vibe:.4f} g</div>'
+            f'<div class="metric-sub">Micro-seismic Energy</div></div>',
             unsafe_allow_html=True,
         )
       with m_col5:
         st.markdown(
-            '<div class="soft-metric soft-metric-success"><div'
-            ' class="metric-title">Power Status</div><div'
-            f' class="metric-value">{curr_batt}%</div><div'
-            ' class="metric-sub">Voltage:'
-            f' {primary_data["battery_v"].iloc[-1]}V</div></div>',
+            f'<div class="soft-metric soft-metric-success">'
+            f'<div class="metric-title">Power Status</div>'
+            f'<div class="metric-value">{curr_batt}%</div>'
+            f'<div class="metric-sub">Voltage: {primary_data["battery_v"].iloc[-1]}V</div></div>',
             unsafe_allow_html=True,
         )
 
