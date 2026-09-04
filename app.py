@@ -1,7 +1,7 @@
 """
 ====================================================================================================
 GEO-SHIELD | Mine Subsidence Monitoring & Control Dashboard
-High Contrast Edition (Flicker-Free Plotly Streaming)
+High Contrast Edition (Flicker-Free PyDeck Streaming)
 ====================================================================================================
 """
 
@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import pydeck as pdk
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime, timedelta
@@ -306,76 +307,60 @@ def main():
             
             # Map Controls
             map_ctrl_c1, map_ctrl_c2, map_ctrl_c3 = st.columns([2, 2, 2])
-            with map_ctrl_c1: map_tile_choice = st.selectbox("Select Basemap Layer (View Style)", ["Satellite (Esri)", "Light Canvas", "Dark Canvas"], index=0, key="map1")
+            with map_ctrl_c1: map_tile_choice = st.selectbox("Select Basemap Layer (View Style)", ["Satellite", "Light Canvas", "Dark Canvas"], index=0, key="map1")
             with map_ctrl_c2: show_mesh_links = st.checkbox("🔗 Render Wireless Mesh Links", value=True, key="map2")
             with map_ctrl_c3: show_hazard_zones = st.checkbox("⚠️ Show Mining Hazard Polygons", value=True, key="map3")
             
-            # Flicker-Free Plotly Mapbox Implementation
-            fig_map = go.Figure()
-
+            # --- FLICKER-FREE PYDECK MAP ENGINE ---
+            layers = []
+            
+            # 1. Hazard Zones (PolygonLayer)
             if show_hazard_zones:
-                fig_map.add_trace(go.Scattermapbox(
-                    mode="lines", fill="toself",
-                    lon=[BASE_LON - 0.0045, BASE_LON + 0.0055, BASE_LON + 0.0060, BASE_LON - 0.0045, BASE_LON - 0.0045],
-                    lat=[BASE_LAT + 0.0055, BASE_LAT + 0.0055, BASE_LAT - 0.0048, BASE_LAT - 0.0048, BASE_LAT + 0.0055],
-                    fillcolor="rgba(59, 130, 246, 0.1)", line=dict(color="#1d4ed8", width=2),
-                    name="Open-Cut Mine Boundary", hoverinfo="name"
-                ))
-                fig_map.add_trace(go.Scattermapbox(
-                    mode="lines", fill="toself",
-                    lon=[BASE_LON - 0.0042, BASE_LON - 0.0018, BASE_LON - 0.0005, BASE_LON - 0.0042, BASE_LON - 0.0042],
-                    lat=[BASE_LAT - 0.0010, BASE_LAT - 0.0010, BASE_LAT - 0.0045, BASE_LAT - 0.0045, BASE_LAT - 0.0010],
-                    fillcolor="rgba(239, 68, 68, 0.25)", line=dict(color="#b91c1c", width=3),
-                    name="CRITICAL: Panel LW-104", hoverinfo="name"
-                ))
+                hazard_data = [
+                    {"contours": [[BASE_LON - 0.0045, BASE_LAT + 0.0055], [BASE_LON + 0.0055, BASE_LAT + 0.0055], [BASE_LON + 0.0060, BASE_LAT - 0.0048], [BASE_LON - 0.0045, BASE_LAT - 0.0048]], "color": [59, 130, 246, 50]},
+                    {"contours": [[BASE_LON - 0.0042, BASE_LAT - 0.0010], [BASE_LON - 0.0018, BASE_LAT - 0.0010], [BASE_LON - 0.0005, BASE_LAT - 0.0045], [BASE_LON - 0.0042, BASE_LAT - 0.0045]], "color": [239, 68, 68, 80]}
+                ]
+                layers.append(pdk.Layer("PolygonLayer", hazard_data, get_polygon="contours", get_fill_color="color", pickable=False))
 
+            # 2. Mesh Links (LineLayer)
             if show_mesh_links:
+                link_data = []
                 node_lookup = {n['node_id']: n for n in NODES_TOPOLOGY}
                 node_lookup['GW-CENTRAL'] = {"lat": GATEWAY_INFO['lat'], "lon": GATEWAY_INFO['lon']}
                 for node in NODES_TOPOLOGY:
                     if node['parent'] in node_lookup:
                         parent = node_lookup[node['parent']]
-                        link_color = "#15803d" if node['snr'] > 7.0 else ("#b45309" if node['snr'] > 4.0 else "#b91c1c")
-                        fig_map.add_trace(go.Scattermapbox(
-                            mode="lines", lon=[node['lon'], parent['lon']], lat=[node['lat'], parent['lat']],
-                            line=dict(color=link_color, width=2), showlegend=False, hoverinfo="none"
-                        ))
-            
-            # Central Gateway
-            fig_map.add_trace(go.Scattermapbox(
-                mode="markers+text", lon=[GATEWAY_INFO['lon']], lat=[GATEWAY_INFO['lat']],
-                marker=dict(size=20, color="#1d4ed8", symbol="star"),
-                text=["GW-CENTRAL"], textposition="top center",
-                name="Master Gateway", hoverinfo="name"
+                        color = [21, 128, 61] if node['snr'] > 7.0 else ([180, 83, 9] if node['snr'] > 4.0 else [185, 28, 28])
+                        link_data.append({"start": [node['lon'], node['lat']], "end": [parent['lon'], parent['lat']], "color": color})
+                
+                layers.append(pdk.Layer("LineLayer", link_data, get_source_position="start", get_target_position="end", get_color="color", get_width=3))
+
+            # 3. Master Gateway Node
+            layers.append(pdk.Layer(
+                "ScatterplotLayer",
+                [{"lon": GATEWAY_INFO['lon'], "lat": GATEWAY_INFO['lat'], "node_id": "GW-CENTRAL", "severity": "MASTER UPLINK", "tilt_mag": 0.0, "displacement_mm": 0.0, "vibration_rms": 0.0}],
+                get_position=["lon", "lat"], get_fill_color=[29, 78, 216], get_radius=60, pickable=True
             ))
 
-            # Live Sensor Nodes
-            colors = latest_analyzed['severity'].map({"CRITICAL": "#dc2626", "WARNING": "#ea580c", "ELEVATED": "#7e22ce", "STABLE": "#16a34a"})
-            hover_texts = latest_analyzed.apply(lambda r: f"<b>{r['node_id']}</b><br>Status: {r['severity']}<br>Tilt: {r['tilt_mag']}°<br>Disp: {r['displacement_mm']} mm<br>Vibe: {r['vibration_rms']} g", axis=1)
-
-            fig_map.add_trace(go.Scattermapbox(
-                mode="markers+text", lon=latest_analyzed['lon'], lat=latest_analyzed['lat'],
-                marker=dict(size=14, color=colors, line=dict(width=2, color="white")),
-                text=latest_analyzed['node_id'].apply(lambda x: x.split('-')[1]),
-                textfont=dict(color="white", size=10, family="Arial Black"),
-                hovertext=hover_texts, hoverinfo="text", name="Sensor Nodes"
+            # 4. Live Sensor Nodes
+            color_map = {"CRITICAL": [220, 38, 38], "WARNING": [234, 88, 12], "ELEVATED": [126, 34, 206], "STABLE": [22, 163, 74]}
+            latest_analyzed['color'] = latest_analyzed['severity'].map(color_map)
+            
+            layers.append(pdk.Layer(
+                "ScatterplotLayer",
+                latest_analyzed,
+                get_position=["lon", "lat"], get_fill_color="color", get_radius=35, pickable=True
             ))
 
-            mapbox_style = "carto-positron"
-            mapbox_layers = []
-            if "Satellite" in map_tile_choice:
-                mapbox_style = "white-bg"
-                mapbox_layers = [{"below": 'traces', "sourcetype": "raster", "sourceattribution": "Esri", "source": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]}]
-            elif "Dark" in map_tile_choice:
-                mapbox_style = "carto-darkmatter"
+            # Map Style & Rendering
+            map_style = pdk.map_styles.SATELLITE if "Satellite" in map_tile_choice else (pdk.map_styles.DARK if "Dark" in map_tile_choice else pdk.map_styles.LIGHT)
+            view_state = pdk.ViewState(latitude=BASE_LAT, longitude=BASE_LON, zoom=14.5, pitch=0)
             
-            fig_map.update_layout(
-                mapbox=dict(style=mapbox_style, layers=mapbox_layers, center=dict(lat=BASE_LAT, lon=BASE_LON), zoom=14.5),
-                margin={"r":0,"t":0,"l":0,"b":0}, height=550, showlegend=False,
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
-            )
+            st.pydeck_chart(pdk.Deck(
+                layers=layers, initial_view_state=view_state, map_style=map_style,
+                tooltip={"html": "<b>{node_id}</b><br/>Status: {severity}<br/>Tilt: {tilt_mag}°<br/>Disp: {displacement_mm} mm<br/>Vibe: {vibration_rms} g"}
+            ))
             
-            st.plotly_chart(fig_map, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
             
             st.markdown('<div class="glass-card"><h4>📋 Real-Time Node Status Table</h4>', unsafe_allow_html=True)
