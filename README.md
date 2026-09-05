@@ -4,7 +4,13 @@
 **Site Deployment Target**: Bowen Basin Longwall Panel 4B (`-23.5512°, 148.1750°`), Central Queensland, Australia.
 
 ---
+## 🚀 Quick Deploy
 
+**1. Deploy the Backend API & AI Engine:**
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/BijoyRoyxxx/AI-enabled-Low-Cost-Real-Time-Mine-Subsidence-Monitoring-Prediction-and-Early-Warning-System-)
+
+**2. Deploy the React Dashboard:**
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FBijoyRoyxxx%2FAI-enabled-Low-Cost-Real-Time-Mine-Subsidence-Monitoring-Prediction-and-Early-Warning-System-)
 ## 1. Executive Summary & Architecture
 
 The **GEO-SHIELD™** dashboard has been rebuilt from a monolithic Streamlit script into a fully decoupled, production-ready full-stack web application.
