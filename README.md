@@ -14,7 +14,7 @@
 <br><br>
 
 **2. Deploy the React Dashboard:**<br>
-<a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FBijoyRoyxxx%2FAI-enabled-Low-Cost-Real-Time-Mine-Subsidence-Monitoring-Prediction-and-Early-Warning-System-">
+<a href="https://vercel.com/new/clone?repository-url=https://ai-enabled-low-cost-real-time-mine.vercel.app/">
   <img src="https://vercel.com/button" width="300" alt="Deploy with Vercel">
 </a>
 ## 1. Executive Summary & Architecture
