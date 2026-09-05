@@ -4,18 +4,18 @@
 **Site Deployment Target**: Bowen Basin Longwall Panel 4B (`-23.5512°, 148.1750°`), Central Queensland, Australia.
 
 ---
-## 🚀 Quick Deploy
+## 🌍 Live Project Links
 
-**1. Deploy the Backend API & AI Engine:**<br>
-<a href="https://render.com/deploy?repo=https://github.com/BijoyRoyxxx/AI-enabled-Low-Cost-Real-Time-Mine-Subsidence-Monitoring-Prediction-and-Early-Warning-System-">
-  <img src="https://render.com/images/deploy-to-render-button.svg" width="300" alt="Deploy to Render">
+**1. Access the Live React Dashboard:**<br>
+<a href="https://ai-enabled-low-cost-real-time-mine.vercel.app/">
+  <img src="https://img.shields.io/badge/View_Live_Dashboard-000000?style=for-the-badge&logo=vercel&logoColor=white" width="300" alt="Live Vercel Dashboard">
 </a>
 
 <br><br>
 
-**2. Deploy the React Dashboard:**<br>
-<a href="https://vercel.com/new/clone?repository-url=https://ai-enabled-low-cost-real-time-mine.vercel.app/">
-  <img src="https://vercel.com/button" width="300" alt="Deploy with Vercel">
+**2. Verify Backend API Health:**<br>
+<a href="https://mine-cawp.onrender.com/health">
+  <img src="https://img.shields.io/badge/Backend_API_Status-46E3B7?style=for-the-badge&logo=render&logoColor=black" width="300" alt="Live Render Backend">
 </a>
 ## 1. Executive Summary & Architecture
 
