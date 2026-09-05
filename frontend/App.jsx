@@ -16,8 +16,8 @@ const STATUS_COLORS = {
 };
 
 // Auto-detect backend port or fallback
-const BACKEND_HTTP = "https://mine-camp.onrender.com";
-const BACKEND_WS = "wss://mine-camp.onrender.com/ws/telemetry";
+const BACKEND_HTTP = "https://mine-cawp.onrender.com";
+const BACKEND_WS = "wss://mine-cawp.onrender.com/ws/telemetry";
 // ============================================================================
 // MAIN APPLICATION COMPONENT
 // ============================================================================

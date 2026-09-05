@@ -5,8 +5,8 @@ const STATUS_COLORS = {
   DANGER: { fill: "#ef4444", stroke: "#b91c1c", bg: "#fef2f2", text: "#b91c1c" }
 };
 // Replace 'your-app-name' with what you plan to name your Render service
-const BACKEND_HTTP = "https://mine-camp.onrender.com";
-const BACKEND_WS = "wss://mine-camp.onrender.com/ws/telemetry";
+const BACKEND_HTTP = "https://mine-cawp.onrender.com";
+const BACKEND_WS = "wss://mine-cawp.onrender.com/ws/telemetry";
 function App() {
   const [activeTab, setActiveTab] = useState("gis");
   const [wsStatus, setWsStatus] = useState("CONNECTING");
