@@ -734,7 +734,15 @@ app = FastAPI(
     description="Decoupled backend for highwall & longwall mine subsidence tracking.",
     lifespan=lifespan
 )
+from fastapi.middleware.cors import CORSMiddleware
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows Vercel to communicate with Render
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

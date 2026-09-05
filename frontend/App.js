@@ -4,8 +4,9 @@ const STATUS_COLORS = {
   WARNING: { fill: "#f59e0b", stroke: "#b45309", bg: "#fffbeb", text: "#b45309" },
   DANGER: { fill: "#ef4444", stroke: "#b91c1c", bg: "#fef2f2", text: "#b91c1c" }
 };
-const BACKEND_HTTP = window.location.origin;
-const BACKEND_WS = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/telemetry`;
+// Replace 'your-app-name' with what you plan to name your Render service
+const BACKEND_HTTP = "https://mine.onrender.com";
+const BACKEND_WS = "wss://mine.onrender.com/ws/telemetry";
 function App() {
   const [activeTab, setActiveTab] = useState("gis");
   const [wsStatus, setWsStatus] = useState("CONNECTING");

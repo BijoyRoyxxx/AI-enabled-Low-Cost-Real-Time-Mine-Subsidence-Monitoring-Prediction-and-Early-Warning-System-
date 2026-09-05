@@ -16,9 +16,8 @@ const STATUS_COLORS = {
 };
 
 // Auto-detect backend port or fallback
-const BACKEND_HTTP = window.location.origin;
-const BACKEND_WS = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/telemetry`;
-
+const BACKEND_HTTP = "https://mine.onrender.com";
+const BACKEND_WS = "wss://mine.onrender.com/ws/telemetry";
 // ============================================================================
 // MAIN APPLICATION COMPONENT
 // ============================================================================
