@@ -6,11 +6,17 @@
 ---
 ## 🚀 Quick Deploy
 
-**1. Deploy the Backend API & AI Engine:**
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/BijoyRoyxxx/AI-enabled-Low-Cost-Real-Time-Mine-Subsidence-Monitoring-Prediction-and-Early-Warning-System-)
+**1. Deploy the Backend API & AI Engine:**<br>
+<a href="https://render.com/deploy?repo=https://github.com/BijoyRoyxxx/AI-enabled-Low-Cost-Real-Time-Mine-Subsidence-Monitoring-Prediction-and-Early-Warning-System-">
+  <img src="https://render.com/images/deploy-to-render-button.svg" width="300" alt="Deploy to Render">
+</a>
 
-**2. Deploy the React Dashboard:**
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FBijoyRoyxxx%2FAI-enabled-Low-Cost-Real-Time-Mine-Subsidence-Monitoring-Prediction-and-Early-Warning-System-)
+<br><br>
+
+**2. Deploy the React Dashboard:**<br>
+<a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FBijoyRoyxxx%2FAI-enabled-Low-Cost-Real-Time-Mine-Subsidence-Monitoring-Prediction-and-Early-Warning-System-">
+  <img src="https://vercel.com/button" width="300" alt="Deploy with Vercel">
+</a>
 ## 1. Executive Summary & Architecture
 
 The **GEO-SHIELD™** dashboard has been rebuilt from a monolithic Streamlit script into a fully decoupled, production-ready full-stack web application.
