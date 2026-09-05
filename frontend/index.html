@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-Enabled Low Cost Real Time Mine Subsidence Monitoring System</title>
+  
+  <!-- Meta & Favicon -->
+  <meta name="description" content="AI-Enabled Low Cost Real Time Mine Subsidence Monitoring System with 4x5 LoRa Mesh, ESP32, and TimesFM Subsidence Forecaster.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%230284c7'><path d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/></svg>">
+
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <!-- Leaflet 1.9.4 (GIS Engine) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- Plotly.js 2.29.1 (Visuals, 3D Trough & Telemetry Charts) -->
+  <script src="https://cdn.plot.ly/plotly-2.29.1.min.js" charset="utf-8"></script>
+
+  <!-- React 18 & ReactDOM (Production Pre-bundled) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+
+  <!-- Custom High-Contrast Light Theme Styles -->
+  <link rel="stylesheet" href="styles.css">
+
+  <script>
+    // Global error listener to display diagnostics if anything fails
+    window.addEventListener('error', function(e) {
+      console.error('Captured UI Error:', e);
+      var root = document.getElementById('root');
+      if (root && root.querySelector('.loader-spinner')) {
+        root.innerHTML = '<div style="max-width:500px;margin:80px auto;padding:24px;background:#fef2f2;border:1px solid #fca5a5;border-radius:12px;font-family:sans-serif;color:#991b1b;">' +
+          '<h3 style="margin-bottom:8px;font-size:16px;">Application Error</h3>' +
+          '<p style="font-size:13px;line-height:1.4;">' + (e.message || 'Error initializing application scripts') + '</p>' +
+          '<p style="font-size:11px;color:#7f1d1d;margin-top:10px;font-family:monospace;">' + (e.filename ? (e.filename.split("/").pop() + ':' + e.lineno) : '') + '</p>' +
+          '<button onclick="location.reload()" style="margin-top:14px;padding:8px 16px;background:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;">Reload Page</button>' +
+          '</div>';
+      }
+    });
+  </script>
+</head>
+<body>
+  <div id="root">
+    <!-- Clean animated placeholder while React mounts -->
+    <div style="display:flex; height:100vh; align-items:center; justify-content:center; flex-direction:column; gap:16px; background:#f8fafc; font-family:'Inter', sans-serif;">
+      <div class="loader-spinner" style="width:40px; height:40px; border:3px solid #e2e8f0; border-top-color:#0284c7; border-radius:50%; animation:spin 1s linear infinite;"></div>
+      <h2 style="color:#0f172a; font-size:18px; font-weight:700;">Initializing Mine Subsidence Monitoring System...</h2>
+      <p style="color:#64748b; font-size:13px;">Connecting to 4×5 LoRa Mesh & Bowen Basin Telemetry Server</p>
+    </div>
+    <style>
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+  </div>
+
+  <!-- Pre-compiled Native React 18 Application (Instant load, no in-browser Babel delay) -->
+  <script src="App.js" defer></script>
+</body>
+</html>
