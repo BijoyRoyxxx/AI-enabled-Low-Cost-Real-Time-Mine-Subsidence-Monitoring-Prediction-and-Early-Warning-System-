@@ -7,8 +7,8 @@ Description:
     Decoupled backend service powering the GEO-SHIELD Mine Subsidence
     Monitoring Dashboard. Provides real-time WebSocket telemetry streaming
     (5s cadence), Isolation Forest multivariate geotechnical anomaly detection,
-    TimesFM 2.5 8-hour subsidence forecasting engine (PyTorch + LoRA),
-    two-way command dispatch, and PostgreSQL / SQLite database persistence.
+    TimesFM 2.5 subsidence forecasting engine, Groq LPU LLM advisory,
+    two-way command dispatch, and PostgreSQL (Neon) / SQLite database persistence.
 ===============================================================================
 """
 
@@ -22,9 +22,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
-from transformers import TimesFm2_5ModelForPrediction
-from peft import PeftModel
-import torch
+
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
@@ -37,6 +35,22 @@ from sqlalchemy import (
     DateTime, Text, text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
+
+# Optional Groq SDK import
+try:
+    from groq import Groq
+    HAS_GROQ_PKG = True
+except ImportError:
+    HAS_GROQ_PKG = False
+
+# Optional PyTorch & Transformers imports with memory-safe fallback
+try:
+    import torch
+    from transformers import TimesFm2_5ModelForPrediction
+    from peft import PeftModel
+    HAS_TORCH_TIMESFM = True
+except (ImportError, Exception):
+    HAS_TORCH_TIMESFM = False
 
 # Configure Logging
 logging.basicConfig(
@@ -67,36 +81,38 @@ MAP_PROVIDER = os.getenv("MAP_PROVIDER", "carto").strip().lower()
 MAP_API_KEY = os.getenv("MAP_API_KEY", "").strip()
 MAP_CUSTOM_TILE_URL = os.getenv("MAP_CUSTOM_TILE_URL", "").strip()
 
-# LLM / AI Prediction Model Configuration
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-2.0-flash").strip()
-LLM_ENDPOINT_URL = os.getenv("LLM_ENDPOINT_URL", "").strip()
+# LLM / AI Advisory Configuration (Defaults to Groq LPU)
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").strip().lower()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", os.getenv("LLM_API_KEY", "")).strip()
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "llama-3.1-8b-instant").strip()
 
 if MAP_API_KEY:
-    logger.info(f"Map API Key loaded (Provider: {MAP_PROVIDER}, Key: {MAP_API_KEY[:6]}...)")
+    logger.info(f"Map API Key loaded (Provider: {MAP_PROVIDER})")
 else:
-    logger.info("Map API Key not provided. Using high-contrast CartoDB basemap.")
+    logger.info("Map API Key not provided. Using CartoDB high-contrast tiles.")
 
-if LLM_API_KEY:
-    logger.info(f"LLM Prediction API Key loaded (Provider: {LLM_PROVIDER}, Model: {LLM_MODEL_NAME})")
+if GROQ_API_KEY:
+    logger.info(f"AI Advisory Key loaded (Provider: {LLM_PROVIDER}, Model: {LLM_MODEL_NAME})")
 else:
-    logger.info("LLM Prediction API Key not set. Using TimesFM physics foundation baseline.")
+    logger.info("No LLM API key detected. Operating in autonomous rule-based geotechnical mode.")
+
 
 # =============================================================================
-# 1. DATABASE CONFIGURATION & FALLBACK HANDLING
+# 1. DATABASE CONFIGURATION & POSTGRESQL / SQLITE FALLBACK
 # =============================================================================
 
-# Allows seamless PostgreSQL connection or zero-config local SQLite fallback
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./geoshield.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./geoshield.db").strip()
 
-# Adjust SQLite connect_args for multithreading
+# SQLAlchemy 1.4+ compatibility fix for Neon/Heroku connection strings
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 connect_args = {"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 
 try:
     engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    logger.info(f"Database engine initialized with URL: {DATABASE_URL.split('@')[-1]}")
+    logger.info(f"Database engine initialized: {DATABASE_URL.split('@')[-1]}")
 except Exception as e:
     logger.warning(f"Could not connect to {DATABASE_URL} ({e}). Falling back to SQLite.")
     DATABASE_URL = "sqlite:///./geoshield.db"
@@ -105,7 +121,6 @@ except Exception as e:
 
 Base = declarative_base()
 
-# SQLAlchemy ORM Models
 class NodeModel(Base):
     __tablename__ = "nodes"
     node_id = Column(String(32), primary_key=True, index=True)
@@ -158,7 +173,7 @@ class CommandAuditLogModel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     node_id = Column(String(32), index=True, nullable=False)
     command_type = Column(String(64), nullable=False)
-    payload = Column(Text, nullable=True) # JSON stored as string for cross-db compatibility
+    payload = Column(Text, nullable=True)
     dispatched_by = Column(String(64), default="GEO-SHIELD_CONTROLLER")
     dispatched_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     status = Column(String(20), default="ACKNOWLEDGED")
@@ -184,33 +199,26 @@ INITIAL_NODES_DATA = [
         "firmware_version": "fw-3.4.0",
         "status": "ACTIVE"
     },
-    # Row 1: N1 - N5 (North Perimeter)
-    {"node_id": "N1", "name": "Surface Unit N1 (Perimeter North-West)", "type": "Surface Sensor Node", "grid_row": 1, "grid_col": 1, "latitude": -23.5500, "longitude": 148.1730, "elevation_m": 265.2, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N2", "name": "Surface Unit N2 (North Perimeter)",      "type": "Surface Sensor Node", "grid_row": 1, "grid_col": 2, "latitude": -23.5500, "longitude": 148.1740, "elevation_m": 265.0, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N3", "name": "Surface Unit N3 (North Centerline)",     "type": "Surface Sensor Node", "grid_row": 1, "grid_col": 3, "latitude": -23.5500, "longitude": 148.1750, "elevation_m": 264.8, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N4", "name": "Surface Unit N4 (North Perimeter East)", "type": "Surface Sensor Node", "grid_row": 1, "grid_col": 4, "latitude": -23.5500, "longitude": 148.1760, "elevation_m": 264.9, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N1", "name": "Surface Unit N1 (Perimeter NW)", "type": "Surface Sensor Node", "grid_row": 1, "grid_col": 1, "latitude": -23.5500, "longitude": 148.1730, "elevation_m": 265.2, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N2", "name": "Surface Unit N2 (North Perimeter)", "type": "Surface Sensor Node", "grid_row": 1, "grid_col": 2, "latitude": -23.5500, "longitude": 148.1740, "elevation_m": 265.0, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N3", "name": "Surface Unit N3 (North Centerline)", "type": "Surface Sensor Node", "grid_row": 1, "grid_col": 3, "latitude": -23.5500, "longitude": 148.1750, "elevation_m": 264.8, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N4", "name": "Surface Unit N4 (North Perimeter E)", "type": "Surface Sensor Node", "grid_row": 1, "grid_col": 4, "latitude": -23.5500, "longitude": 148.1760, "elevation_m": 264.9, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
     {"node_id": "N5", "name": "Surface Unit N5 (North-East Perimeter)", "type": "Surface Sensor Node", "grid_row": 1, "grid_col": 5, "latitude": -23.5500, "longitude": 148.1770, "elevation_m": 265.3, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-
-    # Row 2: N6 - N10 (Mid-North Flank)
-    {"node_id": "N6", "name": "Surface Unit N6 (Mid-North West)",       "type": "Surface Sensor Node", "grid_row": 2, "grid_col": 1, "latitude": -23.5508, "longitude": 148.1730, "elevation_m": 264.5, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N7", "name": "Surface Unit N7 (Upper Trough Flank)",   "type": "Surface Sensor Node", "grid_row": 2, "grid_col": 2, "latitude": -23.5508, "longitude": 148.1740, "elevation_m": 263.2, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N8", "name": "Surface Unit N8 (Trough Tension Zone)",  "type": "Surface Sensor Node", "grid_row": 2, "grid_col": 3, "latitude": -23.5508, "longitude": 148.1750, "elevation_m": 261.8, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N6", "name": "Surface Unit N6 (Mid-North West)", "type": "Surface Sensor Node", "grid_row": 2, "grid_col": 1, "latitude": -23.5508, "longitude": 148.1730, "elevation_m": 264.5, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N7", "name": "Surface Unit N7 (Upper Trough Flank)", "type": "Surface Sensor Node", "grid_row": 2, "grid_col": 2, "latitude": -23.5508, "longitude": 148.1740, "elevation_m": 263.2, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N8", "name": "Surface Unit N8 (Trough Tension Zone)", "type": "Surface Sensor Node", "grid_row": 2, "grid_col": 3, "latitude": -23.5508, "longitude": 148.1750, "elevation_m": 261.8, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
     {"node_id": "N9", "name": "Surface Unit N9 (Upper Trough Flank E)", "type": "Surface Sensor Node", "grid_row": 2, "grid_col": 4, "latitude": -23.5508, "longitude": 148.1760, "elevation_m": 263.0, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N10", "name": "Surface Unit N10 (Mid-North East)",      "type": "Surface Sensor Node", "grid_row": 2, "grid_col": 5, "latitude": -23.5508, "longitude": 148.1770, "elevation_m": 264.8, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-
-    # Row 3: N11 - N15 (Active Longwall Extraction Axis, N13 is ALARM epicenter)
-    {"node_id": "N11", "name": "Surface Unit N11 (Mid-South West)",      "type": "Surface Sensor Node", "grid_row": 3, "grid_col": 1, "latitude": -23.5516, "longitude": 148.1730, "elevation_m": 264.0, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N12", "name": "Surface Unit N12 (Active Shear Flank)",  "type": "Surface Sensor Node", "grid_row": 3, "grid_col": 2, "latitude": -23.5516, "longitude": 148.1740, "elevation_m": 260.5, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N10", "name": "Surface Unit N10 (Mid-North East)", "type": "Surface Sensor Node", "grid_row": 2, "grid_col": 5, "latitude": -23.5508, "longitude": 148.1770, "elevation_m": 264.8, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N11", "name": "Surface Unit N11 (Mid-South West)", "type": "Surface Sensor Node", "grid_row": 3, "grid_col": 1, "latitude": -23.5516, "longitude": 148.1730, "elevation_m": 264.0, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N12", "name": "Surface Unit N12 (Active Shear Flank)", "type": "Surface Sensor Node", "grid_row": 3, "grid_col": 2, "latitude": -23.5516, "longitude": 148.1740, "elevation_m": 260.5, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
     {"node_id": "N13", "name": "Surface Unit N13 (SUBSIDENCE APEX - CRITICAL ANOMALY)", "type": "Surface Sensor Node", "grid_row": 3, "grid_col": 3, "latitude": -23.5516, "longitude": 148.1750, "elevation_m": 256.4, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N14", "name": "Surface Unit N14 (Active Shear Flank E)","type": "Surface Sensor Node", "grid_row": 3, "grid_col": 4, "latitude": -23.5516, "longitude": 148.1760, "elevation_m": 260.8, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N15", "name": "Surface Unit N15 (Mid-South East)",      "type": "Surface Sensor Node", "grid_row": 3, "grid_col": 5, "latitude": -23.5516, "longitude": 148.1770, "elevation_m": 264.2, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-
-    # Row 4: N16 - N20 (South panel overlying coal mine panel cavities)
-    {"node_id": "N16", "name": "Surface Unit N16 (South-West Perimeter)","type": "Surface Sensor Node", "grid_row": 4, "grid_col": 1, "latitude": -23.5524, "longitude": 148.1730, "elevation_m": 264.9, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N17", "name": "Surface Unit N17 (Extensometer Borehole 1)","type": "Surface Sensor Node", "grid_row": 4, "grid_col": 2, "latitude": -23.5524, "longitude": 148.1740, "elevation_m": 262.1, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N18", "name": "Surface Unit N18 (Extensometer Borehole 2)","type": "Surface Sensor Node", "grid_row": 4, "grid_col": 3, "latitude": -23.5524, "longitude": 148.1750, "elevation_m": 259.0, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N19", "name": "Surface Unit N19 (Extensometer Borehole 3)","type": "Surface Sensor Node", "grid_row": 4, "grid_col": 4, "latitude": -23.5524, "longitude": 148.1760, "elevation_m": 261.9, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
-    {"node_id": "N20", "name": "Surface Unit N20 (South-East Perimeter)","type": "Surface Sensor Node", "grid_row": 4, "grid_col": 5, "latitude": -23.5524, "longitude": 148.1770, "elevation_m": 265.1, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"}
+    {"node_id": "N14", "name": "Surface Unit N14 (Active Shear Flank E)", "type": "Surface Sensor Node", "grid_row": 3, "grid_col": 4, "latitude": -23.5516, "longitude": 148.1760, "elevation_m": 260.8, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N15", "name": "Surface Unit N15 (Mid-South East)", "type": "Surface Sensor Node", "grid_row": 3, "grid_col": 5, "latitude": -23.5516, "longitude": 148.1770, "elevation_m": 264.2, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N16", "name": "Surface Unit N16 (South-West Perimeter)", "type": "Surface Sensor Node", "grid_row": 4, "grid_col": 1, "latitude": -23.5524, "longitude": 148.1730, "elevation_m": 264.9, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N17", "name": "Surface Unit N17 (Extensometer Borehole 1)", "type": "Surface Sensor Node", "grid_row": 4, "grid_col": 2, "latitude": -23.5524, "longitude": 148.1740, "elevation_m": 262.1, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N18", "name": "Surface Unit N18 (Extensometer Borehole 2)", "type": "Surface Sensor Node", "grid_row": 4, "grid_col": 3, "latitude": -23.5524, "longitude": 148.1750, "elevation_m": 259.0, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N19", "name": "Surface Unit N19 (Extensometer Borehole 3)", "type": "Surface Sensor Node", "grid_row": 4, "grid_col": 4, "latitude": -23.5524, "longitude": 148.1760, "elevation_m": 261.9, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"},
+    {"node_id": "N20", "name": "Surface Unit N20 (South-East Perimeter)", "type": "Surface Sensor Node", "grid_row": 4, "grid_col": 5, "latitude": -23.5524, "longitude": 148.1770, "elevation_m": 265.1, "depth_m": 45.0, "sampling_interval_sec": 5, "battery_spec": "12V Battery + Solar Buck", "solar_wattage": 20.0, "hardware_version": "ESP32-Node-v2", "firmware_version": "fw-2.8.4", "status": "ACTIVE"}
 ]
 
 HAZARD_ZONES = [
@@ -227,7 +235,7 @@ HAZARD_ZONES = [
         ],
         "max_subsidence_allowable_mm": 85.0,
         "current_subsidence_peak_mm": 54.2,
-        "description": "Directly overlying the active longwall retreating face. Continuous tensile strain and strata fracturing."
+        "description": "Directly overlying active longwall retreating face. Continuous tensile strain and strata fracturing."
     },
     {
         "zone_id": "ZONE-BETA",
@@ -262,60 +270,25 @@ HAZARD_ZONES = [
 ]
 
 def init_db():
-    """Initializes tables and seeds initial topology if missing or mismatched."""
+    """Initializes tables and seeds initial topology if missing."""
     try:
-        needs_recreate = False
-        with engine.connect() as conn:
-            from sqlalchemy import text
-            res_nodes = conn.execute(text("PRAGMA table_info(nodes)")).fetchall()
-            node_cols = {r[1] for r in res_nodes}
-            if node_cols and "grid_row" not in node_cols:
-                needs_recreate = True
-
-            res_logs = conn.execute(text("PRAGMA table_info(telemetry_logs)")).fetchall()
-            log_cols = {r[1] for r in res_logs}
-            if log_cols and "crack_opening_mm" not in log_cols:
-                needs_recreate = True
-
-        if needs_recreate:
-            logger.info("Schema columns missing. Recreating database tables...")
-            Base.metadata.drop_all(bind=engine)
-            Base.metadata.create_all(bind=engine)
-        else:
-            Base.metadata.create_all(bind=engine)
-
-        db: Session = SessionLocal()
-        try:
-            existing_nodes = db.query(NodeModel).count()
-            if existing_nodes != len(INITIAL_NODES_DATA):
-                logger.info(f"Database node count ({existing_nodes}) does not match blueprint ({len(INITIAL_NODES_DATA)}). Updating tables...")
-                Base.metadata.drop_all(bind=engine)
-                Base.metadata.create_all(bind=engine)
-                valid_keys = {c.name for c in NodeModel.__table__.columns}
-                for node_data in INITIAL_NODES_DATA:
-                    node = NodeModel(**{k: v for k, v in node_data.items() if k in valid_keys})
-                    db.add(node)
-                db.commit()
-                logger.info(f"Successfully seeded {len(INITIAL_NODES_DATA)} sensor nodes matching 4x5 LoRa mesh blueprint.")
-        finally:
-            db.close()
-    except Exception as e:
-        logger.warning(f"Error during DB schema check ({e}). Forcing fresh table creation...")
-        Base.metadata.drop_all(bind=engine)
         Base.metadata.create_all(bind=engine)
         db: Session = SessionLocal()
         try:
-            valid_keys = {c.name for c in NodeModel.__table__.columns}
-            for node_data in INITIAL_NODES_DATA:
-                node = NodeModel(**{k: v for k, v in node_data.items() if k in valid_keys})
-                db.add(node)
-            db.commit()
-            logger.info(f"Successfully re-seeded {len(INITIAL_NODES_DATA)} sensor nodes after recreation.")
-        except Exception as inner_e:
-            logger.error(f"Failed to seed after table creation: {inner_e}")
-            db.rollback()
+            existing_count = db.query(NodeModel).count()
+            if existing_count < len(INITIAL_NODES_DATA):
+                valid_keys = {c.name for c in NodeModel.__table__.columns}
+                for node_data in INITIAL_NODES_DATA:
+                    exists = db.query(NodeModel).filter(NodeModel.node_id == node_data["node_id"]).first()
+                    if not exists:
+                        node = NodeModel(**{k: v for k, v in node_data.items() if k in valid_keys})
+                        db.add(node)
+                db.commit()
+                logger.info(f"Database verified with {len(INITIAL_NODES_DATA)} nodes.")
         finally:
             db.close()
+    except Exception as e:
+        logger.error(f"Error during DB initialization: {e}")
 
 
 # =============================================================================
@@ -323,13 +296,10 @@ def init_db():
 # =============================================================================
 
 class GeotechnicalAnomalyDetector:
-    """
-    Multivariate Isolation Forest model calibrated to detect aberrant
-    subsidence rates, abnormal tilt excursions, and micro-seismic bursts.
-    """
+    """Multivariate Isolation Forest model for real-time sensor anomaly detection."""
     def __init__(self):
         self.model = IsolationForest(
-            n_estimators=120,
+            n_estimators=100,
             contamination=0.06,
             max_samples='auto',
             random_state=42
@@ -338,9 +308,8 @@ class GeotechnicalAnomalyDetector:
         self._train_baseline()
 
     def _train_baseline(self):
-        """Trains the model on a synthesized baseline of typical mining conditions."""
         rng = np.random.RandomState(42)
-        n_samples = 1500
+        n_samples = 1200
 
         normal_tilt = rng.exponential(scale=0.15, size=n_samples) + 0.02
         normal_disp = rng.uniform(0.5, 30.0, size=n_samples)
@@ -350,19 +319,11 @@ class GeotechnicalAnomalyDetector:
         X_train = np.column_stack([normal_tilt, normal_disp, normal_vel, normal_vib])
         self.model.fit(X_train)
         self.is_fitted = True
-        logger.info("Isolation Forest anomaly detector fitted on 1,500 baseline geotechnical vectors.")
 
     def evaluate(self, tilt_mag: float, disp: float, vel: float, vib: float) -> Dict[str, Any]:
-        """
-        Evaluates a single telemetry sample.
-        Returns:
-            anomaly_score (0.0 to 1.0, where lower indicates severe anomaly),
-            is_anomaly (bool),
-            health_status ('STABLE', 'WARNING', 'DANGER')
-        """
         vector = np.array([[tilt_mag, disp, vel, vib]])
         raw_score = float(self.model.decision_function(vector)[0])
-        pred = int(self.model.predict(vector)[0]) 
+        pred = int(self.model.predict(vector)[0])
 
         normalized_score = float(1.0 / (1.0 + np.exp(-raw_score * 4.0)))
 
@@ -389,40 +350,33 @@ anomaly_detector = GeotechnicalAnomalyDetector()
 
 
 # =============================================================================
-# 4. AI ENGINE: TIMESFM 2.5 8-HOUR SUBSIDENCE FORECASTING ENGINE
+# 4. AI ENGINE: TIMESFM FORECASTING & GROQ ADVISORY
 # =============================================================================
 
-class TimesFMSubsidenceForecaster:
+class SubsidenceForecaster:
     """
-    Real inference using HuggingFace TimesFM 2.5 with local LoRA weights.
+    Handles subsidence horizon forecasting and requests real-time
+    geotechnical diagnoses via Groq LPU API.
     """
     def __init__(self):
         self.horizon_hours = 8
         self.step_minutes = 30
-        self.num_points = 16 # 8 hours / 30 mins
+        self.num_points = 16
+        self.model_loaded = False
         
-        try:
-            # 1. Load Base HuggingFace TimesFM 2.5 Model
-            base_model = TimesFm2_5ModelForPrediction.from_pretrained(
-                "google/timesfm-2.5-200m-transformers"
-            )
-            
-            # 2. Apply your local LoRA weights
+        # Only initialize local PyTorch model if environment allows (bypasses Render 512MB crash)
+        if HAS_TORCH_TIMESFM and os.getenv("ENABLE_LOCAL_TIMESFM", "false").lower() == "true":
             try:
-                self.model = PeftModel.from_pretrained(
-                    base_model, 
-                    "backend/models/timesfm-mine-finetuned"
-                )
-                logger.info("Loaded custom TimesFM 2.5 LoRA weights via HuggingFace.")
-            except Exception as peft_err:
-                self.model = base_model
-                logger.warning(f"Could not load LoRA, using base TimesFM 2.5 model: {peft_err}")
-
-            self.model.eval()
-            self.model_loaded = True
-        except Exception as e:
-            self.model_loaded = False
-            logger.warning(f"Could not load TimesFM 2.5 model: {e}")
+                base_model = TimesFm2_5ModelForPrediction.from_pretrained("google/timesfm-2.5-200m-transformers")
+                try:
+                    self.model = PeftModel.from_pretrained(base_model, "backend/models/timesfm-mine-finetuned")
+                    logger.info("Custom TimesFM LoRA weights loaded.")
+                except Exception:
+                    self.model = base_model
+                self.model.eval()
+                self.model_loaded = True
+            except Exception as e:
+                logger.warning(f"TimesFM local load skipped: {e}")
 
     def forecast(self, node_id: str, context_array: list, current_vel: float) -> Dict[str, Any]:
         now = datetime.now(timezone.utc)
@@ -431,32 +385,24 @@ class TimesFMSubsidenceForecaster:
         
         current_displacement = context_array[-1] if context_array else 0.0
 
-        # 3. Run inference using the trained model
         if self.model_loaded and len(context_array) > 0:
-            input_data = torch.tensor([context_array], dtype=torch.float32)
-            
-            with torch.no_grad():
-                outputs = self.model(
-                    past_values=input_data
-                )
-                
-            # HF outputs full_predictions of shape: (batch, horizon, quantiles)
-            # Quantiles 1-9 are indices 1-9.
-            quantiles = outputs.full_predictions[0].numpy()
-            
-            p50_forecast = [round(float(v), 2) for v in quantiles[:self.num_points, 5]]
-            p10_forecast = [round(float(v), 2) for v in quantiles[:self.num_points, 1]]
-            p90_forecast = [round(float(v), 2) for v in quantiles[:self.num_points, 9]]
+            try:
+                input_data = torch.tensor([context_array], dtype=torch.float32)
+                with torch.no_grad():
+                    outputs = self.model(past_values=input_data)
+                quantiles = outputs.full_predictions[0].numpy()
+                p50_forecast = [round(float(v), 2) for v in quantiles[:self.num_points, 5]]
+                p10_forecast = [round(float(v), 2) for v in quantiles[:self.num_points, 1]]
+                p90_forecast = [round(float(v), 2) for v in quantiles[:self.num_points, 9]]
+            except Exception:
+                p50_forecast, p10_forecast, p90_forecast = self._physics_projection(current_displacement, current_vel)
         else:
-            p50_forecast = [current_displacement] * self.num_points
-            p10_forecast = [current_displacement] * self.num_points
-            p90_forecast = [current_displacement] * self.num_points
+            p50_forecast, p10_forecast, p90_forecast = self._physics_projection(current_displacement, current_vel)
 
         timestamps = [(now + timedelta(minutes=(step+1)*self.step_minutes)).isoformat() for step in range(self.num_points)]
         
-        # Calculate threshold alerts
-        time_to_warning_hours = next((round((i+1)*0.5, 1) for i, v in enumerate(p50_forecast) if v >= warning_threshold_mm), None)
-        time_to_critical_hours = next((round((i+1)*0.5, 1) for i, v in enumerate(p50_forecast) if v >= critical_threshold_mm), None)
+        time_to_warning = next((round((i+1)*0.5, 1) for i, v in enumerate(p50_forecast) if v >= warning_threshold_mm), None)
+        time_to_critical = next((round((i+1)*0.5, 1) for i, v in enumerate(p50_forecast) if v >= critical_threshold_mm), None)
 
         ai_advisory = self.generate_ai_advisory(node_id, current_displacement, current_vel, p50_forecast[-1])
 
@@ -468,8 +414,8 @@ class TimesFMSubsidenceForecaster:
             "current_velocity_mm_hr": round(current_vel, 2),
             "warning_threshold_mm": warning_threshold_mm,
             "critical_threshold_mm": critical_threshold_mm,
-            "time_to_warning_hours": time_to_warning_hours,
-            "time_to_critical_hours": time_to_critical_hours,
+            "time_to_warning_hours": time_to_warning,
+            "time_to_critical_hours": time_to_critical,
             "ai_geotechnical_advisory": ai_advisory,
             "forecast_points": [
                 {
@@ -481,50 +427,88 @@ class TimesFMSubsidenceForecaster:
                 for t, p10, p50, p90 in zip(timestamps, p10_forecast, p50_forecast, p90_forecast)
             ]
         }
+
+    def _physics_projection(self, current_disp: float, current_vel: float):
+        """Physics-informed continuous projection model."""
+        p50, p10, p90 = [], [], []
+        disp = current_disp
+        for step in range(1, self.num_points + 1):
+            hours = step * 0.5
+            delta = current_vel * hours * (1.0 + 0.03 * hours)
+            p50_val = round(disp + delta, 2)
+            p50.append(p50_val)
+            p10.append(round(max(0.0, p50_val - (0.4 * hours)), 2))
+            p90.append(round(p50_val + (0.8 * hours), 2))
+        return p50, p10, p90
     
     def generate_ai_advisory(self, node_id: str, current_disp: float, current_vel: float, p50_end: float) -> Dict[str, Any]:
-        """
-        Generates geotechnical advisory using configured LLM API (Gemini/OpenAI)
-        or physics-informed fallback rules when API key is unconfigured.
-        """
+        """Queries Groq LPU API for geotechnical advisory."""
         is_apex = "N13" in node_id
         is_flank = node_id in ("N8", "N12", "N14")
 
-        if LLM_API_KEY and LLM_PROVIDER in ("gemini", "google"):
+        if GROQ_API_KEY:
             try:
-                import urllib.request
-                prompt = (
-                    f"You are a Senior Mine Geotechnical Engineer analyzing real-time subsidence telemetry for Node {node_id} "
-                    f"overlying Bowen Basin Longwall Panel 4B.\n"
-                    f"Current displacement: {current_disp:.1f} mm, velocity: {current_vel:.2f} mm/hr. "
-                    f"8-hour predicted peak displacement: {p50_end:.1f} mm. Warning threshold: 50.0 mm. Evacuation limit: 85.0 mm.\n"
-                    f"Provide a structured geotechnical advisory in JSON format with keys:\n"
-                    f"- 'risk_level': 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW'\n"
-                    f"- 'primary_hazard': brief hazard type (e.g. 'Tensile Crown Sag', 'Flank Shear')\n"
-                    f"- 'advisory_summary': 2-3 sentences engineering diagnosis\n"
-                    f"- 'mitigation_action': immediate recommended operational action for the control room"
+                prompt_system = (
+                    "You are a Senior Mine Geotechnical Engineer specializing in longwall mining subsidence. "
+                    "Analyze the given telemetry and respond STRICTLY with a valid JSON object containing exactly these keys: "
+                    "'risk_level' ('CRITICAL', 'HIGH', 'WARNING', or 'STABLE'), "
+                    "'primary_hazard' (brief string, e.g. 'Tensile Crown Sag'), "
+                    "'advisory_summary' (2-3 concise sentences), "
+                    "'mitigation_action' (immediate operational action)."
                 )
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{LLM_MODEL_NAME}:generateContent?key={LLM_API_KEY}"
-                payload = json.dumps({
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
-                }).encode("utf-8")
-                req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=4.0) as res:
-                    resp_json = json.loads(res.read().decode("utf-8"))
-                    text_content = resp_json["candidates"][0]["content"]["parts"][0]["text"]
-                    parsed = json.loads(text_content)
-                    return {
-                        "provider": f"Google Gemini ({LLM_MODEL_NAME}) [LIVE API]",
-                        "has_live_api": True,
-                        "risk_level": parsed.get("risk_level", "CRITICAL" if is_apex else "STABLE"),
-                        "primary_hazard": parsed.get("primary_hazard", "Overburden Tension Sag"),
-                        "advisory_summary": parsed.get("advisory_summary", ""),
-                        "mitigation_action": parsed.get("mitigation_action", "")
-                    }
-            except Exception as e:
-                logger.warning(f"Live Gemini API call failed or timed out ({e}). Falling back to baseline.")
+                prompt_user = (
+                    f"Node: {node_id} | Location: Longwall Panel 4B\n"
+                    f"Current Sag: {current_disp:.1f} mm | Velocity: {current_vel:.2f} mm/hr | "
+                    f"8-Hr Predicted Sag: {p50_end:.1f} mm\n"
+                    f"Warning Threshold: 50.0 mm | Evacuation Limit: 85.0 mm."
+                )
 
+                if HAS_GROQ_PKG:
+                    client = Groq(api_key=GROQ_API_KEY)
+                    completion = client.chat.completions.create(
+                        model=LLM_MODEL_NAME,
+                        messages=[
+                            {"role": "system", "content": prompt_system},
+                            {"role": "user", "content": prompt_user}
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0.2,
+                        max_tokens=250
+                    )
+                    parsed = json.loads(completion.choices[0].message.content)
+                else:
+                    import urllib.request
+                    url = "https://api.groq.com/openai/v1/chat/completions"
+                    headers = {
+                        "Authorization": f"Bearer {GROQ_API_KEY}",
+                        "Content-Type": "application/json"
+                    }
+                    payload = json.dumps({
+                        "model": LLM_MODEL_NAME,
+                        "messages": [
+                            {"role": "system", "content": prompt_system},
+                            {"role": "user", "content": prompt_user}
+                        ],
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0.2
+                    }).encode("utf-8")
+                    req = urllib.request.Request(url, data=payload, headers=headers)
+                    with urllib.request.urlopen(req, timeout=3.5) as res:
+                        resp_data = json.loads(res.read().decode("utf-8"))
+                        parsed = json.loads(resp_data["choices"][0]["message"]["content"])
+
+                return {
+                    "provider": f"Groq LPU ({LLM_MODEL_NAME}) [LIVE API]",
+                    "has_live_api": True,
+                    "risk_level": parsed.get("risk_level", "CRITICAL" if is_apex else "STABLE"),
+                    "primary_hazard": parsed.get("primary_hazard", "Overburden Tension Sag"),
+                    "advisory_summary": parsed.get("advisory_summary", ""),
+                    "mitigation_action": parsed.get("mitigation_action", "")
+                }
+            except Exception as e:
+                logger.warning(f"Groq API call bypassed ({e}). Using geotechnical physics baseline.")
+
+        # Baseline fallback rules
         if is_apex or current_disp >= 50.0:
             risk = "CRITICAL"
             hazard = "Tensile Crown Fracturing & Overburden Collapse"
@@ -550,29 +534,23 @@ class TimesFMSubsidenceForecaster:
             )
             action = "Continue standard 5-second LoRaWAN telemetry monitoring."
 
-        key_hint = " (Set LLM_API_KEY in api_keys.env for live Gemini reasoning)" if not LLM_API_KEY else ""
         return {
-            "provider": f"TimesFM Geotechnical Foundation Model{key_hint}",
-            "has_live_api": bool(LLM_API_KEY),
+            "provider": "TimesFM Geotechnical Baseline",
+            "has_live_api": bool(GROQ_API_KEY),
             "risk_level": risk,
             "primary_hazard": hazard,
             "advisory_summary": summary,
             "mitigation_action": action
         }
 
-timesfm_forecaster = TimesFMSubsidenceForecaster()
+forecaster = SubsidenceForecaster()
 
 
 # =============================================================================
-# 5. REAL-TIME TELEMETRY SIMULATION STATE & GENERATOR
+# 5. REAL-TIME TELEMETRY SIMULATOR
 # =============================================================================
 
 class MineTelemetrySimulator:
-    """
-    Maintains continuous simulated state of the 10 geotechnical sensors,
-    injecting realistic physical phenomena (strata settlement, face advance,
-    occasional micro-seismic goaf fracturing).
-    """
     def __init__(self):
         self.state: Dict[str, Dict[str, Any]] = {}
         self.tick_counter = 0
@@ -718,31 +696,24 @@ simulator = MineTelemetrySimulator()
 
 
 # =============================================================================
-# 6. FASTAPI APPLICATION SETUP
+# 6. FASTAPI SETUP & CORS MIDDLEWARE
 # =============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    logger.info("GEO-SHIELD Monitoring Engine ready. Telemetry broadcaster listening.")
+    logger.info("GEO-SHIELD Monitoring Engine running.")
     yield
     logger.info("Shutting down GEO-SHIELD Monitoring Engine.")
 
 app = FastAPI(
     title="GEO-SHIELD Mine Subsidence Monitoring API",
     version="2.0.0",
-    description="Decoupled backend for highwall & longwall mine subsidence tracking.",
+    description="Decoupled backend engine for mine subsidence tracking.",
     lifespan=lifespan
 )
-from fastapi.middleware.cors import CORSMiddleware
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows Vercel to communicate with Render
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Cross-Origin Resource Sharing (CORS) for Vercel Frontend Connection
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -753,7 +724,7 @@ app.add_middleware(
 
 
 # =============================================================================
-# 7. WEBSOCKET CONNECTION MANAGER
+# 7. WEBSOCKET REAL-TIME STREAMING
 # =============================================================================
 
 class WebSocketConnectionManager:
@@ -814,7 +785,7 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
                 db.commit()
                 db.close()
             except Exception as e:
-                logger.error(f"Error saving telemetry frame: {e}")
+                logger.error(f"Error persisting telemetry: {e}")
 
             max_disp = max(item["displacement_mm"] for item in telemetry_snapshot)
             max_vel = max(item["subsidence_velocity_mm_hr"] for item in telemetry_snapshot)
@@ -852,7 +823,7 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
     except Exception as e:
-        logger.warning(f"WebSocket error: {e}")
+        logger.warning(f"WebSocket session closed: {e}")
         ws_manager.disconnect(websocket)
 
 
@@ -872,7 +843,7 @@ def health_check():
         "status": "healthy",
         "service": "GEO-SHIELD Mine Subsidence Monitoring Backend",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "database": DATABASE_URL.split("///")[-1]
+        "database": DATABASE_URL.split("///")[-1].split("@")[-1]
     }
 
 @app.get("/api/config")
@@ -887,8 +858,7 @@ def get_service_config():
         "llm": {
             "provider": LLM_PROVIDER,
             "model_name": LLM_MODEL_NAME,
-            "endpoint_url": LLM_ENDPOINT_URL,
-            "has_key": bool(LLM_API_KEY)
+            "has_key": bool(GROQ_API_KEY)
         }
     }
 
@@ -962,32 +932,25 @@ def get_recent_telemetry(node_id: Optional[str] = None, limit: int = Query(60, g
 
 @app.get("/api/forecast/timesfm")
 def get_timesfm_forecast(node_id: str = Query("N13")):
-    """
-    REST endpoint serving the TimesFM 8-hour displacement forecasts
-    using real PyTorch inference on historical context.
-    """
+    """REST endpoint delivering 8-hour subsidence forecasts and Groq AI advisories."""
     db: Session = SessionLocal()
     try:
         records = db.query(TelemetryLogModel.displacement_mm)\
                     .filter(TelemetryLogModel.node_id == node_id)\
                     .order_by(TelemetryLogModel.timestamp.desc())\
                     .limit(512).all()
-        
         context_array = [r[0] for r in reversed(records)]
         if len(context_array) < 512:
             context_array = [0.0] * (512 - len(context_array)) + context_array
-            
     finally:
         db.close()
 
     curr = simulator.state.get(node_id, {"vel": 2.45})
-    
-    forecast_data = timesfm_forecaster.forecast(
+    return forecaster.forecast(
         node_id=node_id,
         context_array=context_array,
         current_vel=curr.get("vel", 2.45)
     )
-    return forecast_data
 
 @app.get("/api/hazards")
 def get_hazard_zones():
@@ -1094,15 +1057,15 @@ def dispatch_remote_command(payload: CommandDispatchPayload):
                 simulator.state[payload.node_id]["tilt_y"] = 0.01
             msg = f"MPU6050 biaxial tilt bias recalibrated to factory horizon."
         elif cmd == "TRIGGER_LOCAL_SIREN":
-            msg = f"Audible site siren activated via Gateway Base Station relay."
+            msg = "Audible site siren activated via Gateway Base Station relay."
         elif cmd == "ACTIVATE_BUZZER":
             msg = f"Onboard alert buzzer pulsed at 85dB on {payload.node_id}."
         elif cmd == "TRIGGER_EMERGENCY_BEACON":
-            msg = f"RF beacon & Red LED strobe active for visual emergency location."
+            msg = "RF beacon & Red LED strobe active for visual emergency location."
         elif cmd == "ENTER_LOW_POWER_SLEEP":
-            msg = f"ESP32 light sleep duty cycle set to 10s intervals."
+            msg = "ESP32 light sleep duty cycle set to 10s intervals."
         elif cmd == "RESET_MODEM":
-            msg = f"SX1278 spread-spectrum modem soft rebooted and re-joined mesh."
+            msg = "SX1278 spread-spectrum modem soft rebooted and re-joined mesh."
 
         log_record = CommandAuditLogModel(
             node_id=payload.node_id,
@@ -1114,8 +1077,6 @@ def dispatch_remote_command(payload: CommandDispatchPayload):
         )
         db.add(log_record)
         db.commit()
-
-        logger.info(f"Dispatched command {cmd} to {payload.node_id}: {msg}")
 
         return {
             "status": "SUCCESS",
@@ -1163,7 +1124,6 @@ frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "fr
 if os.path.exists(frontend_dir):
     app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
-
 
 if __name__ == "__main__":
     import uvicorn

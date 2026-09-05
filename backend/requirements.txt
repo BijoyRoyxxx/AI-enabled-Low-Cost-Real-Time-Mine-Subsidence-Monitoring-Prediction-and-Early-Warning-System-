@@ -11,3 +11,7 @@ torch>=2.2.0
 peft>=0.10.0
 huggingface_hub
 timesfm==2.0.2
+fastapi
+uvicorn
+# ... your other dependencies ...
+groq
