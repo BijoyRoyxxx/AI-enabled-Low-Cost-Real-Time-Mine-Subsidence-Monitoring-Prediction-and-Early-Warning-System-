@@ -1,8 +1,6 @@
 # GEO-SHIELD™ Mine Subsidence Monitoring Dashboard
 ### Production-Grade Decoupled Geotechnical Telemetry & AI Early Warning System
 
-**Site Deployment Target**: Bowen Basin Longwall Panel 4B (`-23.5512°, 148.1750°`), Central Queensland, Australia.
-
 ---
 ## 🌍 Live Project Links
 
